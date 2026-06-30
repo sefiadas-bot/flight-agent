@@ -1,0 +1,29 @@
+name: Daily Flight Check
+
+on:
+  schedule:
+    - cron: '0 7 * * *'   # 07:00 UTC = 10:00 Israel time (IDT, UTC+3)
+  workflow_dispatch:        # allows manual trigger from GitHub UI
+
+jobs:
+  check-flights:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run flight checker
+        env:
+          SERPAPI_KEY:        ${{ secrets.SERPAPI_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python flight_checker.py
