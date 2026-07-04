@@ -75,11 +75,12 @@ def build_message(origin, destination, max_price, flights):
         f"Found {len(flights)} deal(s) under ${max_price}!\n",
     ]
     for i, flight in enumerate(flights, 1):
-        price = flight["price"]
-        legs  = flight["legs"]
-        out_str = fmt_leg(legs[0], "Out") if len(legs) > 0 else "  Out: N/A"
-        ret_str = fmt_leg(legs[1], "Ret") if len(legs) > 1 else "  Ret: N/A"
-        lines.append(f"#{i} - ${price}\n{out_str}\n{ret_str}")
+        price       = flight["price"]
+        return_date = flight["return_date"]
+        legs        = flight["legs"]
+        leg_strs = [fmt_leg(legs[j], "Out" if j == 0 else f"Leg{j+1}") for j in range(len(legs))]
+        leg_strs.append(f"  Ret: {return_date}")
+        lines.append(f"#{i} - ${price}\n" + "\n".join(leg_strs))
     return "\n\n".join(lines)
 
 def send_telegram(message):
