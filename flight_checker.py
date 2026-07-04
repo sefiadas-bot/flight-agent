@@ -1,66 +1,63 @@
 import os
+import json
 import requests
 from datetime import datetime
 
-# ── Config ────────────────────────────────────────────────────────────────────
 SERPAPI_KEY        = os.environ["SERPAPI_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID   = os.environ["TELEGRAM_CHAT_ID"]
 
-ORIGIN      = "TLV"
-DESTINATION = "BUD"
-MAX_PRICE   = 400
-CURRENCY    = "USD"
+def load_searches():
+    with open("searches.json") as f:
+        return json.load(f)
 
-# 3 representative ~7-night trips → 3 API calls/day ≈ 90/month (free tier = 100)
-DATE_PAIRS = [
-    ("2026-09-19", "2026-09-26"),
-    ("2026-09-21", "2026-09-28"),
-    ("2026-09-23", "2026-09-30"),
-]
-# ─────────────────────────────────────────────────────────────────────────────
-
-
-def search_flights(outbound_date: str, return_date: str) -> list[dict]:
+def search_flights(origin, destination, outbound_date, return_date, stops=1):
     params = {
-        "engine":         "google_flights",
-        "departure_id":   ORIGIN,
-        "arrival_id":     DESTINATION,
-        "outbound_date":  outbound_date,
-        "return_date":    return_date,
-        "currency":       CURRENCY,
-        "hl":             "en",
-        "type":           "1",      # round trip
-        "stops":          "1",      # nonstop only
-        "outbound_times": "0,840",  # depart between 00:00 and 14:00 (840 min from midnight)
-        "api_key":        SERPAPI_KEY,
+        "engine":        "google_flights",
+        "departure_id":  origin,
+        "arrival_id":    destination,
+        "outbound_date": outbound_date,
+        "return_date":   return_date,
+        "currency":      "USD",
+        "hl":            "en",
+        "type":          1,
+        "stops":         stops,
+        "api_key":       SERPAPI_KEY,
     }
-
     resp = requests.get("https://serpapi.com/search", params=params, timeout=30)
     resp.raise_for_status()
-    data = resp.json()
+    return resp.json()
 
+def parse_flights(data, max_price, max_depart_hour, outbound_date, return_date):
     results = []
     for section in ("best_flights", "other_flights"):
         for flight in data.get(section, []):
             price = flight.get("price", 9999)
-            if price <= MAX_PRICE:
-                results.append({
-                    "price":         price,
-                    "outbound_date": outbound_date,
-                    "return_date":   return_date,
-                    "legs":          flight.get("flights", []),
-                })
+            if price > max_price:
+                continue
+            legs = flight.get("flights", [])
+            if not legs:
+                continue
+            dep_time_str = legs[0].get("departure_airport", {}).get("time", "")
+            try:
+                dep_dt = datetime.strptime(dep_time_str, "%Y-%m-%d %H:%M")
+                if dep_dt.hour > max_depart_hour or (dep_dt.hour == max_depart_hour and dep_dt.minute > 0):
+                    continue
+            except ValueError:
+                pass
+            results.append({
+                "price":         price,
+                "outbound_date": outbound_date,
+                "return_date":   return_date,
+                "legs":          legs,
+            })
     return results
 
-
-def fmt_leg(leg: dict, label: str) -> str:
-    dep      = leg.get("departure_airport", {})
-    arr      = leg.get("arrival_airport", {})
-    airline  = leg.get("airline", "")
+def fmt_leg(leg, label):
+    dep = leg.get("departure_airport", {})
+    arr = leg.get("arrival_airport", {})
+    airline   = leg.get("airline", "")
     flight_no = leg.get("flight_number", "")
-
-    # SerpApi returns times as "2026-09-19 08:30"
     try:
         dep_dt = datetime.strptime(dep.get("time", ""), "%Y-%m-%d %H:%M")
         arr_dt = datetime.strptime(arr.get("time", ""), "%Y-%m-%d %H:%M")
@@ -69,76 +66,66 @@ def fmt_leg(leg: dict, label: str) -> str:
     except ValueError:
         dep_str = dep.get("time", "?")
         arr_str = arr.get("time", "?")
+    return f"  {label}: {dep_str} -> {arr_str}  ({airline} {flight_no})"
 
-    return f"  {label}: {dep_str} \u2192 {arr_str}  ({airline} {flight_no})"
-
-
-def build_message(all_flights: list[dict]) -> str | None:
-    if not all_flights:
-        return None
-
+def build_message(origin, destination, max_price, flights):
     today = datetime.now().strftime("%d %b %Y")
     lines = [
-        f"\u2708\ufe0f *TLV \u2192 BUD Flight Alert* | {today}",
-        f"Found *{len(all_flights)}* deal(s) under ${MAX_PRICE}!\n",
+        f"{origin} -> {destination} | {today}",
+        f"Found {len(flights)} deal(s) under ${max_price}!\n",
     ]
-
-    for i, flight in enumerate(all_flights, 1):
+    for i, flight in enumerate(flights, 1):
         price = flight["price"]
         legs  = flight["legs"]
-
-        # Nonstop round trip: legs[0] = outbound (TLV→BUD), legs[1] = return (BUD→TLV)
-        out_str = fmt_leg(legs[0], "\U0001f6eb Out") if len(legs) > 0 else "  \U0001f6eb Out: N/A"
-        ret_str = fmt_leg(legs[1], "\U0001f6ec Ret") if len(legs) > 1 else "  \U0001f6ec Ret: N/A"
-
-        lines.append(
-            f"*#{i} \u2014 ${price}*\n"
-            f"{out_str}\n"
-            f"{ret_str}"
-        )
-
+        out_str = fmt_leg(legs[0], "Out") if len(legs) > 0 else "  Out: N/A"
+        ret_str = fmt_leg(legs[1], "Ret") if len(legs) > 1 else "  Ret: N/A"
+        lines.append(f"#{i} - ${price}\n{out_str}\n{ret_str}")
     return "\n\n".join(lines)
 
-
-def send_telegram(message: str) -> None:
-    url  = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
-    resp = requests.post(
-        url,
-        json={
-            "chat_id":                  TELEGRAM_CHAT_ID,
-            "text":                     message,
-            "parse_mode":               "Markdown",
-            "disable_web_page_preview": True,
-        },
-        timeout=15,
-    )
+def send_telegram(message):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    resp = requests.post(url, json={
+        "chat_id":  TELEGRAM_CHAT_ID,
+        "text":     message,
+        "disable_web_page_preview": True,
+    }, timeout=15)
     resp.raise_for_status()
 
+def main():
+    searches = load_searches()
+    print(f"Loaded {len(searches)} search(es).")
 
-def main() -> None:
-    print(f"Searching {ORIGIN} \u2192 {DESTINATION} | max ${MAX_PRICE} | direct | depart \u226414:00")
+    for search in searches:
+        origin          = search["origin"]
+        destination     = search["destination"]
+        max_price       = search["max_price"]
+        max_depart_hour = search.get("max_depart_hour", 23)
+        date_pairs      = search["date_pairs"]
 
-    all_flights: list[dict] = []
-    for outbound_date, return_date in DATE_PAIRS:
-        print(f"  Checking {outbound_date} / {return_date} ...")
-        try:
-            found = search_flights(outbound_date, return_date)
-            all_flights.extend(found)
-            print(f"    \u2192 {len(found)} deal(s) found")
-        except Exception as e:
-            print(f"    \u2192 Error: {e}")
+        print(f"\n{origin} -> {destination} | max ${max_price} | depart <={max_depart_hour}:00")
+        all_flights = []
 
-    all_flights.sort(key=lambda f: f["price"])
+        for outbound_date, return_date in date_pairs:
+            outbound_date = outbound_date.replace(' ', '')
+            return_date = return_date.replace(' ', '')
+            print(f"  Checking {outbound_date} / {return_date} ...")
+            try:
+                data  = search_flights(origin, destination, outbound_date, return_date)
+                found = parse_flights(data, max_price, max_depart_hour, outbound_date, return_date)
+                all_flights.extend(found)
+                print(f"    -> {len(found)} deal(s) found")
+            except Exception as e:
+                print(f"    -> Error: {e}")
 
-    print(f"\nTotal deals under ${MAX_PRICE}: {len(all_flights)}")
+        all_flights.sort(key=lambda f: f["price"])
+        print(f"  Total: {len(all_flights)} deal(s)")
 
-    message = build_message(all_flights)
-    if message:
-        send_telegram(message)
-        print("Telegram notification sent.")
-    else:
-        print("No deals today \u2014 no notification sent.")
-
+        if all_flights:
+            message = build_message(origin, destination, max_price, all_flights)
+            send_telegram(message)
+            print("  Telegram notification sent.")
+        else:
+            print("  No deals - no notification sent.")
 
 if __name__ == "__main__":
     main()
