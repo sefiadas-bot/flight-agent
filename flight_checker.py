@@ -11,24 +11,23 @@ def load_searches():
     with open("searches.json") as f:
         return json.load(f)
 
-def search_flights(origin, destination, outbound_date, return_date, stops=1):
+def search_one_way(origin, destination, date, stops=1):
     params = {
-        "engine":        "google_flights",
-        "departure_id":  origin,
-        "arrival_id":    destination,
-        "outbound_date": outbound_date,
-        "return_date":   return_date,
-        "currency":      "USD",
-        "hl":            "en",
-        "type":          1,
-        "stops":         stops,
-        "api_key":       SERPAPI_KEY,
+        "engine":       "google_flights",
+        "departure_id": origin,
+        "arrival_id":   destination,
+        "outbound_date": date,
+        "currency":     "USD",
+        "hl":           "en",
+        "type":         2,
+        "stops":        stops,
+        "api_key":      SERPAPI_KEY,
     }
     resp = requests.get("https://serpapi.com/search", params=params, timeout=30)
     resp.raise_for_status()
     return resp.json()
 
-def parse_flights(data, max_price, max_depart_hour, outbound_date, return_date):
+def get_flights(data, max_price, max_depart_hour=None):
     results = []
     for section in ("best_flights", "other_flights"):
         for flight in data.get(section, []):
@@ -38,19 +37,38 @@ def parse_flights(data, max_price, max_depart_hour, outbound_date, return_date):
             legs = flight.get("flights", [])
             if not legs:
                 continue
-            dep_time_str = legs[0].get("departure_airport", {}).get("time", "")
-            try:
-                dep_dt = datetime.strptime(dep_time_str, "%Y-%m-%d %H:%M")
-                if dep_dt.hour > max_depart_hour or (dep_dt.hour == max_depart_hour and dep_dt.minute > 0):
-                    continue
-            except ValueError:
-                pass
-            results.append({
-                "price":         price,
-                "outbound_date": outbound_date,
-                "return_date":   return_date,
-                "legs":          legs,
-            })
+            if max_depart_hour is not None:
+                dep_time_str = legs[0].get("departure_airport", {}).get("time", "")
+                try:
+                    dep_dt = datetime.strptime(dep_time_str, "%Y-%m-%d %H:%M")
+                    if dep_dt.hour > max_depart_hour or (dep_dt.hour == max_depart_hour and dep_dt.minute > 0):
+                        continue
+                except ValueError:
+                    pass
+            results.append({"price": price, "legs": legs})
+    return results
+
+def find_round_trips(origin, destination, outbound_date, return_date, max_price, max_depart_hour):
+    out_data = search_one_way(origin, destination, outbound_date)
+    ret_data = search_one_way(destination, origin, return_date)
+
+    out_flights = get_flights(out_data, max_price, max_depart_hour)
+    ret_flights = get_flights(ret_data, max_price)
+
+    results = []
+    for out in out_flights:
+        for ret in ret_flights:
+            total = out["price"] + ret["price"]
+            if total <= max_price:
+                results.append({
+                    "price":         total,
+                    "out_price":     out["price"],
+                    "ret_price":     ret["price"],
+                    "outbound_date": outbound_date,
+                    "return_date":   return_date,
+                    "out_legs":      out["legs"],
+                    "ret_legs":      ret["legs"],
+                })
     return results
 
 def fmt_leg(leg, label):
@@ -71,16 +89,26 @@ def fmt_leg(leg, label):
 def build_message(origin, destination, max_price, flights):
     today = datetime.now().strftime("%d %b %Y")
     lines = [
-        f"{origin} -> {destination} | {today}",
+        f"{origin} -> {destination} (round trip) | {today}",
         f"Found {len(flights)} deal(s) under ${max_price}!\n",
     ]
     for i, flight in enumerate(flights, 1):
-        price       = flight["price"]
-        return_date = flight["return_date"]
-        legs        = flight["legs"]
-        leg_strs = [fmt_leg(legs[j], "Out" if j == 0 else f"Leg{j+1}") for j in range(len(legs))]
-        leg_strs.append(f"  Ret: {return_date}")
-        lines.append(f"#{i} - ${price}\n" + "\n".join(leg_strs))
+        price     = flight["price"]
+        out_legs  = flight["out_legs"]
+        ret_legs  = flight["ret_legs"]
+        out_price = flight["out_price"]
+        ret_price = flight["ret_price"]
+
+        leg_strs = []
+        for j, leg in enumerate(out_legs):
+            leg_strs.append(fmt_leg(leg, "Out" if j == 0 else f"  +"))
+        for j, leg in enumerate(ret_legs):
+            leg_strs.append(fmt_leg(leg, "Ret" if j == 0 else f"  +"))
+
+        lines.append(
+            f"#{i} - ${price} (out ${out_price} + ret ${ret_price})\n" +
+            "\n".join(leg_strs)
+        )
     return "\n\n".join(lines)
 
 def send_telegram(message):
@@ -108,17 +136,28 @@ def main():
 
         for outbound_date, return_date in date_pairs:
             outbound_date = outbound_date.replace(' ', '')
-            return_date = return_date.replace(' ', '')
+            return_date   = return_date.replace(' ', '')
             print(f"  Checking {outbound_date} / {return_date} ...")
             try:
-                data  = search_flights(origin, destination, outbound_date, return_date)
-                found = parse_flights(data, max_price, max_depart_hour, outbound_date, return_date)
+                found = find_round_trips(origin, destination, outbound_date, return_date, max_price, max_depart_hour)
                 all_flights.extend(found)
                 print(f"    -> {len(found)} deal(s) found")
             except Exception as e:
                 print(f"    -> Error: {e}")
 
         all_flights.sort(key=lambda f: f["price"])
+        # Deduplicate: same outbound+return flight combo might appear from multiple date combinations
+        seen = set()
+        unique = []
+        for f in all_flights:
+            key = (f["outbound_date"], f["return_date"],
+                   f["out_legs"][0].get("flight_number",""),
+                   f["ret_legs"][0].get("flight_number",""))
+            if key not in seen:
+                seen.add(key)
+                unique.append(f)
+        all_flights = unique
+
         print(f"  Total: {len(all_flights)} deal(s)")
 
         if all_flights:
