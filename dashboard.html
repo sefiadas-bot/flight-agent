@@ -1,0 +1,569 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Flight Agent Dashboard</title>
+<style>
+:root {
+  --bg: #0d1117;
+  --surface: #161b22;
+  --surface2: #21262d;
+  --border: #30363d;
+  --accent: #58a6ff;
+  --green: #3fb950;
+  --red: #f85149;
+  --yellow: #d29922;
+  --text: #c9d1d9;
+  --muted: #8b949e;
+  --radius: 6px;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: var(--bg); color: var(--text); font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; font-size: 14px; line-height: 1.5; }
+.container { max-width: 860px; margin: 0 auto; padding: 24px 16px; }
+
+/* Header */
+header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 20px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
+header h1 { font-size: 20px; font-weight: 600; }
+header h1 span { color: var(--accent); }
+.header-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+
+/* Sections */
+section { margin-bottom: 28px; }
+.section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+.section-head h2 { font-size: 14px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+/* Cards */
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; }
+.card + .card { margin-top: 10px; }
+
+/* Buttons */
+.btn { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; border-radius: var(--radius); border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-size: 13px; font-weight: 500; cursor: pointer; transition: all .12s; text-decoration: none; white-space: nowrap; }
+.btn:hover { border-color: var(--accent); color: var(--accent); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn-primary { background: var(--accent); border-color: var(--accent); color: #0d1117; font-weight: 600; }
+.btn-primary:hover { background: #79beff; border-color: #79beff; color: #0d1117; }
+.btn-success { background: var(--green); border-color: var(--green); color: #0d1117; font-weight: 600; }
+.btn-success:hover { background: #56d364; border-color: #56d364; color: #0d1117; }
+.btn-danger { border-color: transparent; color: var(--muted); background: transparent; }
+.btn-danger:hover { border-color: var(--red); color: var(--red); background: transparent; }
+.btn-sm { padding: 3px 8px; font-size: 12px; }
+
+/* Forms */
+.form-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.fg { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 100px; }
+.fg.narrow { flex: 0 0 90px; min-width: 90px; }
+label { font-size: 11px; color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }
+input[type=text], input[type=password], input[type=number], input[type=date], select {
+  padding: 6px 9px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+  color: var(--text); font-size: 13px; outline: none; transition: border-color .12s; width: 100%;
+}
+input:focus, select:focus { border-color: var(--accent); }
+input[type=date] { color-scheme: dark; }
+
+/* Search cards */
+.sc { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+.sc-head { display: flex; align-items: center; justify-content: space-between; padding: 11px 14px; cursor: pointer; user-select: none; }
+.sc-head:hover { background: var(--surface2); }
+.sc-route { font-size: 15px; font-weight: 600; }
+.sc-route .arr { color: var(--accent); margin: 0 5px; }
+.sc-meta { font-size: 11px; color: var(--muted); margin-top: 2px; }
+.sc-body { padding: 12px 14px; border-top: 1px solid var(--border); display: none; }
+.sc-body.open { display: block; }
+
+/* Date pairs */
+.dp { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.dp input[type=date] { width: 140px; flex: 0 0 140px; }
+.dp-sep { color: var(--muted); font-size: 12px; }
+
+/* Badges */
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 20px; font-size: 11px; font-weight: 600; }
+.badge-ok  { background: rgba(63,185,80,.15); color: var(--green); }
+.badge-err { background: rgba(248,81,73,.15);  color: var(--red); }
+.badge-run { background: rgba(88,166,255,.15); color: var(--accent); }
+.badge-na  { background: rgba(139,148,158,.1); color: var(--muted); }
+.dot { width: 7px; height: 7px; border-radius: 50%; display: inline-block; flex-shrink: 0; }
+.dot-g { background: var(--green); }
+.dot-r { background: var(--red); }
+.dot-b { background: var(--accent); animation: pulse 1.4s infinite; }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:.3 } }
+
+/* Runs */
+.run-row { display: flex; align-items: center; gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
+.run-row:last-child { border-bottom: none; }
+.run-num { color: var(--muted); width: 38px; flex-shrink: 0; }
+.run-evt { color: var(--muted); font-size: 11px; }
+.run-time { color: var(--muted); margin-left: auto; }
+
+/* Cron */
+.cron-box { font-family: 'Courier New', monospace; font-size: 15px; color: var(--accent); background: var(--bg); padding: 5px 10px; border-radius: var(--radius); border: 1px solid var(--border); display: inline-block; }
+.cron-human { font-size: 11px; color: var(--muted); margin-top: 4px; }
+
+/* Spin */
+.spin { display:inline-block; width:13px; height:13px; border:2px solid var(--border); border-top-color:var(--accent); border-radius:50%; animation:spin .6s linear infinite; }
+@keyframes spin { to { transform:rotate(360deg) } }
+
+/* Toast */
+#toast { position:fixed; bottom:20px; right:20px; padding:9px 14px; background:var(--surface2); border:1px solid var(--border); border-radius:var(--radius); font-size:13px; display:none; z-index:999; max-width:280px; }
+#toast.show { display:block; }
+#toast.ok  { border-color:var(--green); color:var(--green); }
+#toast.err { border-color:var(--red);   color:var(--red); }
+
+/* Settings */
+#settings-panel { margin-bottom: 20px; }
+
+/* Divider */
+hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
+
+/* Utils */
+.flex { display:flex; } .gap-8 { gap:8px; } .gap-10 { gap:10px; }
+.items-center { align-items:center; } .justify-between { justify-content:space-between; }
+.mt-8 { margin-top:8px; } .mt-12 { margin-top:12px; }
+.muted { color:var(--muted); }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <!-- HEADER -->
+  <header>
+    <div>
+      <h1>✈ Flight <span>Agent</span></h1>
+      <div class="header-sub" id="last-run-summary">Loading…</div>
+    </div>
+    <div class="flex gap-8 items-center">
+      <button class="btn btn-success" id="run-btn" onclick="triggerRun()">▶ Run Now</button>
+      <button class="btn btn-sm" onclick="toggleSettings()">⚙ Settings</button>
+    </div>
+  </header>
+
+  <!-- SETTINGS -->
+  <div id="settings-panel" style="display:none">
+    <div class="card">
+      <div style="font-size:12px; font-weight:600; color:var(--muted); text-transform:uppercase; letter-spacing:.05em; margin-bottom:10px;">Settings</div>
+      <div class="form-row" style="align-items:flex-end;">
+        <div class="fg">
+          <label>GitHub Token (with repo + workflow scope)</label>
+          <input type="password" id="gh-token" placeholder="ghp_…" />
+        </div>
+        <div class="fg">
+          <label>Repository</label>
+          <input type="text" id="gh-repo" placeholder="owner/repo" />
+        </div>
+        <button class="btn btn-primary" onclick="saveSettings()" style="height:33px;flex-shrink:0">Save</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCHEDULE -->
+  <section>
+    <div class="section-head"><h2>📅 Schedule</h2></div>
+    <div class="card">
+      <div class="flex justify-between items-center gap-10" style="flex-wrap:wrap; gap:12px;">
+        <div>
+          <div id="cron-display" class="cron-box">…</div>
+          <div id="cron-human" class="cron-human"></div>
+        </div>
+        <div class="flex gap-8 items-center">
+          <input type="text" id="cron-input" style="width:150px; font-family:monospace;" placeholder="0 7 * * *" />
+          <button class="btn btn-primary" onclick="saveCron()">Save</button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- RECENT RUNS -->
+  <section>
+    <div class="section-head"><h2>📊 Recent Runs</h2><button class="btn btn-sm" onclick="loadRuns()">↺ Refresh</button></div>
+    <div class="card"><div id="runs-list">Loading…</div></div>
+  </section>
+
+  <!-- SEARCHES -->
+  <section>
+    <div class="section-head">
+      <h2>🔍 Searches</h2>
+      <button class="btn btn-primary btn-sm" onclick="showAddForm()">+ Add Route</button>
+    </div>
+    <div id="searches-list">Loading…</div>
+  </section>
+
+  <!-- ADD FORM -->
+  <section id="add-section" style="display:none;">
+    <div class="section-head"><h2>➕ New Route</h2></div>
+    <div class="card">
+      <div class="form-row">
+        <div class="fg narrow">
+          <label>Origin</label>
+          <input type="text" id="n-origin" placeholder="TLV" maxlength="3" oninput="this.value=this.value.toUpperCase()" />
+        </div>
+        <div class="fg narrow">
+          <label>Destination</label>
+          <input type="text" id="n-dest" placeholder="BUD" maxlength="3" oninput="this.value=this.value.toUpperCase()" />
+        </div>
+        <div class="fg narrow">
+          <label>Max Price ($)</label>
+          <input type="number" id="n-price" placeholder="450" min="1" value="450" />
+        </div>
+        <div class="fg narrow">
+          <label>Max Depart Hour</label>
+          <input type="number" id="n-hour" placeholder="14" min="0" max="23" value="14" />
+        </div>
+      </div>
+      <hr />
+      <div class="flex justify-between items-center" style="margin-bottom:8px;">
+        <label style="margin:0;">Date Pairs (outbound → return)</label>
+        <button class="btn btn-sm" onclick="addNewPair()">+ Add Pair</button>
+      </div>
+      <div id="new-pairs"></div>
+      <div class="flex gap-8 mt-12">
+        <button class="btn btn-primary" onclick="saveNewSearch()">Save Route</button>
+        <button class="btn" onclick="hideAddForm()">Cancel</button>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div id="toast"></div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────────
+const getToken = () => localStorage.getItem('gh_token') || '';
+const getRepo  = () => localStorage.getItem('gh_repo')  || 'sefiadas-bot/flight-agent';
+
+function saveSettings() {
+  localStorage.setItem('gh_token', document.getElementById('gh-token').value.trim());
+  localStorage.setItem('gh_repo',  document.getElementById('gh-repo').value.trim());
+  toast('Settings saved', 'ok');
+  loadAll();
+}
+
+function toggleSettings() {
+  const p = document.getElementById('settings-panel');
+  const show = p.style.display === 'none';
+  p.style.display = show ? 'block' : 'none';
+  if (show) {
+    document.getElementById('gh-token').value = getToken();
+    document.getElementById('gh-repo').value  = getRepo();
+  }
+}
+
+// ── GitHub API ────────────────────────────────────────────────────────────────
+const baseHeaders = () => ({
+  'Authorization': `token ${getToken()}`,
+  'Accept': 'application/vnd.github+json',
+  'Content-Type': 'application/json'
+});
+
+async function ghFetch(method, path, body) {
+  const url = `https://api.github.com/repos/${getRepo()}${path}`;
+  const r = await fetch(url, { method, headers: baseHeaders(), body: body ? JSON.stringify(body) : undefined });
+  if (r.status === 204) return null;
+  const d = await r.json();
+  if (!r.ok) throw new Error(d.message || r.status);
+  return d;
+}
+
+// ── File helpers ──────────────────────────────────────────────────────────────
+let sJson = { sha: null, data: [] };
+let sYaml = { sha: null, content: '' };
+
+async function fetchSearches() {
+  const d = await ghFetch('GET', '/contents/searches.json');
+  sJson.sha  = d.sha;
+  sJson.data = JSON.parse(atob(d.content.replace(/\s/g, '')));
+  return sJson.data;
+}
+
+async function pushSearches(searches) {
+  const d = await ghFetch('PUT', '/contents/searches.json', {
+    message: 'Update searches via dashboard',
+    content: btoa(unescape(encodeURIComponent(JSON.stringify(searches, null, 2) + '\n'))),
+    sha: sJson.sha
+  });
+  sJson.sha = d.content.sha;
+  sJson.data = searches;
+}
+
+async function fetchWorkflow() {
+  const d = await ghFetch('GET', '/contents/.github/workflows/main.yml');
+  sYaml.sha     = d.sha;
+  sYaml.content = atob(d.content.replace(/\s/g, ''));
+  return sYaml.content;
+}
+
+async function pushWorkflow(content) {
+  const d = await ghFetch('PUT', '/contents/.github/workflows/main.yml', {
+    message: 'Update schedule via dashboard',
+    content: btoa(unescape(encodeURIComponent(content))),
+    sha: sYaml.sha
+  });
+  sYaml.sha     = d.content.sha;
+  sYaml.content = content;
+}
+
+// ── Cron helpers ──────────────────────────────────────────────────────────────
+function parseCron(yaml) {
+  const m = yaml.match(/cron:\s*['"]([^'"]+)['"]/);
+  return m ? m[1] : '0 7 * * *';
+}
+
+function cronHuman(expr) {
+  try {
+    const [min, hr] = expr.trim().split(/\s+/);
+    if (hr === '*') return `Every hour at :${min.padStart(2,'0')}`;
+    const h = +hr, m = +min;
+    const utc  = `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')} UTC`;
+    const il   = `${String((h+3)%24).padStart(2,'0')}:${String(m).padStart(2,'0')} Israel time`;
+    return `Daily at ${utc} = ${il}`;
+  } catch { return expr; }
+}
+
+function setCronDisplay(expr) {
+  document.getElementById('cron-display').textContent = expr;
+  document.getElementById('cron-human').textContent   = cronHuman(expr);
+  document.getElementById('cron-input').value         = expr;
+}
+
+async function saveCron() {
+  const v = document.getElementById('cron-input').value.trim();
+  if (!v) return toast('Enter a cron expression', 'err');
+  try {
+    const newYaml = sYaml.content.replace(/cron:\s*['"][^'"]+['"]/, `cron: '${v}'`);
+    await pushWorkflow(newYaml);
+    setCronDisplay(v);
+    toast('Schedule saved!', 'ok');
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Recent runs ───────────────────────────────────────────────────────────────
+function timeSince(iso) {
+  const s = Math.floor((Date.now() - new Date(iso)) / 1000);
+  if (s < 60)   return s + 's ago';
+  if (s < 3600) return Math.floor(s/60) + 'm ago';
+  if (s < 86400)return Math.floor(s/3600) + 'h ago';
+  return Math.floor(s/86400) + 'd ago';
+}
+
+function conclusionBadge(c) {
+  if (!c)            return `<span class="badge badge-run"><span class="dot dot-b"></span>Running</span>`;
+  if (c==='success') return `<span class="badge badge-ok"><span class="dot dot-g"></span>Success</span>`;
+  if (c==='failure') return `<span class="badge badge-err"><span class="dot dot-r"></span>Failed</span>`;
+  return `<span class="badge badge-na">${c}</span>`;
+}
+
+async function loadRuns() {
+  try {
+    const d = await ghFetch('GET', '/actions/runs?per_page=6');
+    const runs = d.workflow_runs;
+    const el = document.getElementById('runs-list');
+    if (!runs.length) { el.innerHTML = '<span class="muted">No runs yet.</span>'; return; }
+
+    const latest = runs[0];
+    document.getElementById('last-run-summary').innerHTML =
+      `Last run: ${conclusionBadge(latest.conclusion)} &nbsp;${timeSince(latest.created_at)}`;
+
+    el.innerHTML = runs.map(r => `
+      <div class="run-row">
+        <span class="run-num">#${r.run_number}</span>
+        ${conclusionBadge(r.conclusion)}
+        <span class="run-evt">${r.event}</span>
+        <span class="run-time">${timeSince(r.created_at)}</span>
+        <a href="${r.html_url}" target="_blank" class="btn btn-sm" style="margin-left:4px">↗ Logs</a>
+      </div>`).join('');
+  } catch(e) { toast('Runs error: ' + e.message, 'err'); }
+}
+
+// ── Searches ──────────────────────────────────────────────────────────────────
+function renderSearches() {
+  const el = document.getElementById('searches-list');
+  if (!sJson.data.length) {
+    el.innerHTML = '<div class="muted" style="font-size:13px">No searches configured. Add one above.</div>';
+    return;
+  }
+  el.innerHTML = sJson.data.map((s, i) => `
+    <div class="sc">
+      <div class="sc-head" onclick="toggleSC(${i})">
+        <div>
+          <div class="sc-route">${s.origin}<span class="arr">→</span>${s.destination}</div>
+          <div class="sc-meta">Max $${s.max_price} &nbsp;·&nbsp; Depart ≤${s.max_depart_hour ?? 23}:00 &nbsp;·&nbsp; ${s.date_pairs.length} date pair${s.date_pairs.length !== 1 ? 's' : ''}</div>
+        </div>
+        <div class="flex gap-8 items-center">
+          <button class="btn btn-danger btn-sm" onclick="event.stopPropagation(); deleteSearch(${i})">✕ Remove</button>
+          <span class="muted" id="sc-arrow-${i}">▾</span>
+        </div>
+      </div>
+      <div class="sc-body" id="scb-${i}">
+        <div class="form-row" style="margin-bottom:12px;">
+          <div class="fg narrow">
+            <label>Max Price ($)</label>
+            <input type="number" value="${s.max_price}" min="1" onchange="sJson.data[${i}].max_price=+this.value" />
+          </div>
+          <div class="fg narrow">
+            <label>Max Depart Hour</label>
+            <input type="number" value="${s.max_depart_hour ?? 23}" min="0" max="23" onchange="sJson.data[${i}].max_depart_hour=+this.value" />
+          </div>
+        </div>
+        <div style="font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:8px;">Date Pairs</div>
+        <div id="dp-list-${i}">
+          ${s.date_pairs.map((p, j) => datePairRow(i, j, p[0], p[1])).join('')}
+        </div>
+        <div class="flex gap-8 mt-8">
+          <button class="btn btn-sm" onclick="addPairToSearch(${i})">+ Add Pair</button>
+          <button class="btn btn-primary btn-sm" onclick="saveAllSearches()">💾 Save Changes</button>
+        </div>
+      </div>
+    </div>`).join('');
+}
+
+function datePairRow(si, pi, v0, v1) {
+  return `<div class="dp" id="dp-${si}-${pi}">
+    <input type="date" value="${v0}" onchange="sJson.data[${si}].date_pairs[${pi}][0]=this.value" />
+    <span class="dp-sep">→</span>
+    <input type="date" value="${v1}" onchange="sJson.data[${si}].date_pairs[${pi}][1]=this.value" />
+    <button class="btn btn-danger btn-sm" onclick="removePair(${si},${pi})">✕</button>
+  </div>`;
+}
+
+function toggleSC(i) {
+  const body  = document.getElementById(`scb-${i}`);
+  const arrow = document.getElementById(`sc-arrow-${i}`);
+  const open  = body.classList.toggle('open');
+  arrow.textContent = open ? '▴' : '▾';
+}
+
+function removePair(si, pi) {
+  sJson.data[si].date_pairs.splice(pi, 1);
+  renderSearches();
+  document.getElementById(`scb-${si}`).classList.add('open');
+}
+
+function addPairToSearch(si) {
+  sJson.data[si].date_pairs.push(['2026-09-22', '2026-09-29']);
+  renderSearches();
+  const body = document.getElementById(`scb-${si}`);
+  body.classList.add('open');
+}
+
+async function deleteSearch(i) {
+  const s = sJson.data[i];
+  if (!confirm(`Remove ${s.origin} → ${s.destination}?`)) return;
+  sJson.data.splice(i, 1);
+  try {
+    await pushSearches(sJson.data);
+    renderSearches();
+    toast('Route removed', 'ok');
+  } catch(e) {
+    sJson.data.splice(i, 0, s); // rollback
+    toast('Error: ' + e.message, 'err');
+  }
+}
+
+async function saveAllSearches() {
+  try {
+    await pushSearches(sJson.data);
+    renderSearches();
+    toast('Searches saved!', 'ok');
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+}
+
+// ── Add new search ────────────────────────────────────────────────────────────
+let newPairs = [];
+
+function showAddForm() {
+  newPairs = [['2026-09-22', '2026-09-29']];
+  document.getElementById('n-origin').value = '';
+  document.getElementById('n-dest').value   = '';
+  document.getElementById('n-price').value  = '450';
+  document.getElementById('n-hour').value   = '14';
+  renderNewPairs();
+  document.getElementById('add-section').style.display = 'block';
+  document.getElementById('add-section').scrollIntoView({ behavior: 'smooth' });
+}
+
+function hideAddForm() {
+  document.getElementById('add-section').style.display = 'none';
+}
+
+function renderNewPairs() {
+  document.getElementById('new-pairs').innerHTML = newPairs.map((p, i) => `
+    <div class="dp">
+      <input type="date" value="${p[0]}" onchange="newPairs[${i}][0]=this.value" />
+      <span class="dp-sep">→</span>
+      <input type="date" value="${p[1]}" onchange="newPairs[${i}][1]=this.value" />
+      <button class="btn btn-danger btn-sm" onclick="newPairs.splice(${i},1);renderNewPairs()">✕</button>
+    </div>`).join('');
+}
+
+function addNewPair() {
+  newPairs.push(['2026-09-22', '2026-09-29']);
+  renderNewPairs();
+}
+
+async function saveNewSearch() {
+  const origin = document.getElementById('n-origin').value.trim().toUpperCase();
+  const dest   = document.getElementById('n-dest').value.trim().toUpperCase();
+  const price  = parseInt(document.getElementById('n-price').value);
+  const hour   = parseInt(document.getElementById('n-hour').value);
+  if (!origin || !dest || isNaN(price)) return toast('Fill in all fields', 'err');
+  if (!newPairs.length) return toast('Add at least one date pair', 'err');
+  const entry = { origin, destination: dest, max_price: price, max_depart_hour: hour, date_pairs: newPairs.map(p => [...p]) };
+  sJson.data.push(entry);
+  try {
+    await pushSearches(sJson.data);
+    renderSearches();
+    hideAddForm();
+    toast(`Added ${origin} → ${dest}`, 'ok');
+  } catch(e) {
+    sJson.data.pop();
+    toast('Error: ' + e.message, 'err');
+  }
+}
+
+// ── Run Now ───────────────────────────────────────────────────────────────────
+async function triggerRun() {
+  const btn = document.getElementById('run-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spin"></span> Running…';
+  try {
+    await ghFetch('POST', '/actions/workflows/main.yml/dispatches', { ref: 'main' });
+    toast('Workflow triggered! Check Telegram in ~1 min.', 'ok');
+    setTimeout(loadRuns, 5000);
+  } catch(e) { toast('Error: ' + e.message, 'err'); }
+  finally { setTimeout(() => { btn.disabled = false; btn.innerHTML = '▶ Run Now'; }, 6000); }
+}
+
+// ── Toast ─────────────────────────────────────────────────────────────────────
+let toastT;
+function toast(msg, type) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.className = `show ${type || ''}`;
+  clearTimeout(toastT);
+  toastT = setTimeout(() => el.className = '', 3500);
+}
+
+// ── Init ──────────────────────────────────────────────────────────────────────
+async function loadAll() {
+  if (!getToken()) {
+    document.getElementById('settings-panel').style.display = 'block';
+    document.getElementById('gh-token').value = getToken();
+    document.getElementById('gh-repo').value  = getRepo();
+    document.getElementById('searches-list').innerHTML   = '<span class="muted">Enter your GitHub token in Settings to load data.</span>';
+    document.getElementById('runs-list').innerHTML        = '<span class="muted">–</span>';
+    document.getElementById('last-run-summary').innerHTML = 'Not connected';
+    return;
+  }
+  try {
+    const [searches, yaml] = await Promise.all([fetchSearches(), fetchWorkflow(), loadRuns()]);
+    setCronDisplay(parseCron(yaml));
+    renderSearches();
+  } catch(e) {
+    toast('Load error: ' + e.message, 'err');
+  }
+}
+
+loadAll();
+</script>
+</body>
+</html>

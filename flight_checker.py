@@ -86,6 +86,14 @@ def fmt_leg(leg, label):
         arr_str = arr.get("time", "?")
     return f"  {label}: {dep_str} -> {arr_str}  ({airline} {flight_no})"
 
+def build_booking_url(origin, destination, outbound_date, return_date):
+    return (
+        f"https://www.google.com/flights?hl=en"
+        f"#flt={origin}.{destination}.{outbound_date}"
+        f"*{destination}.{origin}.{return_date}"
+        f";c:USD;e:1;sd:1;t:f"
+    )
+
 def build_message(origin, destination, max_price, flights):
     today = datetime.now().strftime("%d %b %Y")
     lines = [
@@ -105,9 +113,11 @@ def build_message(origin, destination, max_price, flights):
         for j, leg in enumerate(ret_legs):
             leg_strs.append(fmt_leg(leg, "Ret" if j == 0 else f"  +"))
 
+        url = build_booking_url(origin, destination, flight["outbound_date"], flight["return_date"])
         lines.append(
             f"#{i} - ${price} (out ${out_price} + ret ${ret_price})\n" +
-            "\n".join(leg_strs)
+            "\n".join(leg_strs) +
+            f"\n  Book: {url}"
         )
     return "\n\n".join(lines)
 
