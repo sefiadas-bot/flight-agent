@@ -46,7 +46,7 @@
   {
     "origin": "TLV",
     "destination": "AMS",
-    "max_price": 450,
+    "max_price": 650,
     "max_depart_hour": 14,
     "date_pairs": [
       [
