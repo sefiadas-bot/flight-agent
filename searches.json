@@ -46,5 +46,17 @@
         "2027-04-29"
       ]
     ]
+  },
+  {
+    "origin": "TLV",
+    "destination": "SOF",
+    "max_price": 450,
+    "max_depart_hour": 14,
+    "date_pairs": [
+      [
+        "2027-04-22",
+        "2027-04-30"
+      ]
+    ]
   }
 ]
