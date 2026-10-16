@@ -5,7 +5,12 @@ import smtplib
 from datetime import datetime
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
-from fast_flights import FlightData, Passengers, create_filter, get_flights
+from amadeus import Client, ResponseError
+
+amadeus = Client(
+    client_id=os.environ["AMADEUS_CLIENT_ID"],
+    client_secret=os.environ["AMADEUS_CLIENT_SECRET"],
+)
 
 EMAIL_FROM         = os.environ["EMAIL_FROM"]
 EMAIL_TO           = os.environ["EMAIL_TO"]
@@ -25,49 +30,47 @@ def load_searches():
     with open("searches.json") as f:
         return json.load(f)
 
-def parse_price(price_str):
-    try:
-        return int(str(price_str).replace("$", "").replace(",", "").strip())
-    except Exception:
-        return 9999
-
-def parse_hour(time_str):
-    for fmt in ("%I:%M %p", "%H:%M"):
-        try:
-            return datetime.strptime(str(time_str).strip(), fmt).hour
-        except ValueError:
-            continue
-    return 0
-
 def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour):
-    f = create_filter(
-        flight_data=[
-            FlightData(date=outbound_date, from_airport=origin,      to_airport=destination),
-            FlightData(date=return_date,   from_airport=destination, to_airport=origin),
-        ],
-        trip="round-trip",
-        seat="economy",
-        passengers=Passengers(adults=1),
+    response = amadeus.shopping.flight_offers_search.get(
+        originLocationCode=origin,
+        destinationLocationCode=destination,
+        departureDate=outbound_date,
+        returnDate=return_date,
+        adults=1,
+        currencyCode="USD",
+        max=10,
+        nonStop=False,
     )
-    result = get_flights(f)
 
     deals = []
-    for flight in result.flights:
-        price = parse_price(getattr(flight, "price", 9999))
+    for offer in response.data:
+        price = float(offer["price"]["grandTotal"])
         if price > max_price:
             continue
-        dep = getattr(flight, "departure", "")
-        if max_depart_hour is not None and dep:
-            if parse_hour(dep) > max_depart_hour:
-                continue
+
+        outbound_itin = offer["itineraries"][0]
+        first_seg     = outbound_itin["segments"][0]
+        dep_at        = first_seg["departure"]["at"]   # "2027-04-01T05:40:00"
+        dep_hour      = datetime.fromisoformat(dep_at).hour
+
+        if max_depart_hour is not None and dep_hour > max_depart_hour:
+            continue
+
+        airline    = offer.get("validatingAirlineCodes", ["?"])[0]
+        out_stops  = len(outbound_itin["segments"]) - 1
+        dep_time   = dep_at[11:16]
+        arr_time   = outbound_itin["segments"][-1]["arrival"]["at"][11:16]
+        duration   = outbound_itin.get("duration", "")
+
         deals.append({
-            "price":     price,
-            "airline":   getattr(flight, "airline",   "?"),
-            "departure": dep,
-            "arrival":   getattr(flight, "arrival",   "?"),
-            "duration":  getattr(flight, "duration",  "?"),
-            "stops":     getattr(flight, "stops",     "?"),
+            "price":    int(price),
+            "airline":  airline,
+            "departure": dep_time,
+            "arrival":   arr_time,
+            "duration":  duration.replace("PT", "").replace("H", "h ").replace("M", "m"),
+            "stops":     out_stops,
         })
+
     return sorted(deals, key=lambda x: x["price"])
 
 def build_google_url(origin, destination, outbound_date, return_date):
@@ -100,9 +103,9 @@ def main():
 
     print(f"Loaded {len(raw_searches)} config(s) → {len(searches)} search(es).")
 
-    today     = datetime.now().strftime("%d %b %Y")
-    any_deals = False
-    summary   = [f"Flight Check — {today}\n"]
+    today         = datetime.now().strftime("%d %b %Y")
+    any_deals     = False
+    summary       = [f"Flight Check — {today}\n"]
     deal_sections = []
 
     for search in searches:
@@ -124,10 +127,10 @@ def main():
                 found = find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour)
                 route_deals.extend(found)
                 print(f"    -> {len(found)} deal(s)")
-            except Exception as e:
+            except ResponseError as e:
                 errors.append(str(e))
                 print(f"    -> Error: {e}")
-            time.sleep(2)
+            time.sleep(1)
 
         route_deals = sorted(route_deals, key=lambda x: x["price"])
         date_strs   = ", ".join(f"{o}→{r}" for o, r in date_pairs)
@@ -139,7 +142,7 @@ def main():
             summary.append(
                 f"✅ {route_line}\n"
                 f"   Best: ${best['price']} | {best['airline']} | "
-                f"{best['departure']} → {best['arrival']} | {best['stops']} stop(s)"
+                f"{best['departure']}→{best['arrival']} | {best['stops']} stop(s)"
             )
             section = [f"{'='*55}", f"✈  {origin} → {destination}  |  max ${max_price}", f"{'='*55}"]
             for i, d in enumerate(route_deals, 1):

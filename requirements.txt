@@ -1,3 +1,2 @@
-fast-flights
+amadeus
 requests
-typing_extensions
