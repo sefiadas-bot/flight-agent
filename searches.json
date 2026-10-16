@@ -46,5 +46,17 @@
         "2027-10-21"
       ]
     ]
+  },
+  {
+    "origin": "TLV",
+    "destination": "ALL",
+    "max_price": 450,
+    "max_depart_hour": 14,
+    "date_pairs": [
+      [
+        "2027-04-01",
+        "2027-04-10"
+      ]
+    ]
   }
 ]
