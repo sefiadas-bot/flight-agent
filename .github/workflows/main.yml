@@ -11,7 +11,7 @@ jobs:
       - uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.12'
-      - run: pip install -r requirements.txt
+      - run: pip install --no-cache-dir typing_extensions && pip install --no-cache-dir -r requirements.txt
       - name: Run
         env:
           TRAVELPAYOUTS_TOKEN: ${{ secrets.TRAVELPAYOUTS_TOKEN }}
