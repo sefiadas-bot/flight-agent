@@ -134,6 +134,10 @@ def main():
     searches = load_searches()
     print(f"Loaded {len(searches)} search(es).")
 
+    today = datetime.now().strftime("%d %b %Y")
+    summary_lines = [f"✈ Flight Check — {today}\n"]
+    any_deals = False
+
     for search in searches:
         origin          = search["origin"]
         destination     = search["destination"]
@@ -143,6 +147,7 @@ def main():
 
         print(f"\n{origin} -> {destination} | max ${max_price} | depart <={max_depart_hour}:00")
         all_flights = []
+        errors = []
 
         for outbound_date, return_date in date_pairs:
             outbound_date = outbound_date.replace(' ', '')
@@ -153,6 +158,7 @@ def main():
                 all_flights.extend(found)
                 print(f"    -> {len(found)} deal(s) found")
             except Exception as e:
+                errors.append(str(e))
                 print(f"    -> Error: {e}")
 
         all_flights.sort(key=lambda f: f["price"])
@@ -170,12 +176,24 @@ def main():
 
         print(f"  Total: {len(all_flights)} deal(s)")
 
+        date_range_strs = [f"{o} → {r}" for o, r in date_pairs]
+        route_header = f"🔍 {origin} → {destination} (max ${max_price}, depart ≤{max_depart_hour}:00)"
+        dates_str    = "  Dates: " + ", ".join(date_range_strs)
+
         if all_flights:
+            any_deals = True
+            summary_lines.append(f"{route_header}\n{dates_str}\n  ✅ {len(all_flights)} deal(s) found — details below")
             message = build_message(origin, destination, max_price, all_flights)
             send_telegram(message)
             print("  Telegram notification sent.")
+        elif errors:
+            summary_lines.append(f"{route_header}\n{dates_str}\n  ⚠️ Error: {errors[0]}")
         else:
-            print("  No deals - no notification sent.")
+            summary_lines.append(f"{route_header}\n{dates_str}\n  ❌ No deals found")
+
+    summary_lines.append(f"\n{'🎉 Deals found above!' if any_deals else '😔 No deals today.'}")
+    send_telegram("\n\n".join(summary_lines))
+    print("\nSummary notification sent.")
 
 if __name__ == "__main__":
     main()

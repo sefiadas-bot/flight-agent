@@ -182,7 +182,15 @@ hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
   <section>
     <div class="section-head">
       <h2>🔍 Searches</h2>
-      <button class="btn btn-primary btn-sm" onclick="showAddForm()">+ Add Route</button>
+      <div class="flex gap-8 items-center">
+        <div class="flex items-center gap-8">
+          <label style="margin:0; white-space:nowrap;">Destination:</label>
+          <select id="dest-filter" onchange="renderSearches()" style="width:auto; min-width:90px;">
+            <option value="">All</option>
+          </select>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="showAddForm()">+ Add Route</button>
+      </div>
     </div>
     <div id="searches-list">Loading…</div>
   </section>
@@ -260,7 +268,12 @@ async function ghFetch(method, path, body) {
   const r = await fetch(url, { method, headers: baseHeaders(), body: body ? JSON.stringify(body) : undefined });
   if (r.status === 204) return null;
   const d = await r.json();
-  if (!r.ok) throw new Error(d.message || r.status);
+  if (!r.ok) {
+    if (r.status === 401) throw new Error('Bad credentials — check your GitHub token in ⚙ Settings');
+    if (r.status === 403) throw new Error('Forbidden — token may lack repo/workflow scopes');
+    if (r.status === 404) throw new Error('Not found — check the repository name in ⚙ Settings');
+    throw new Error(d.message || r.status);
+  }
   return d;
 }
 
@@ -377,11 +390,23 @@ async function loadRuns() {
 // ── Searches ──────────────────────────────────────────────────────────────────
 function renderSearches() {
   const el = document.getElementById('searches-list');
-  if (!sJson.data.length) {
-    el.innerHTML = '<div class="muted" style="font-size:13px">No searches configured. Add one above.</div>';
+
+  // Refresh destination filter options
+  const filterSel = document.getElementById('dest-filter');
+  const currentFilter = filterSel.value;
+  const dests = [...new Set(sJson.data.map(s => s.destination))].sort();
+  filterSel.innerHTML = '<option value="">All</option>' +
+    dests.map(d => `<option value="${d}" ${d === currentFilter ? 'selected' : ''}>${d}</option>`).join('');
+
+  const filtered = currentFilter ? sJson.data.filter(s => s.destination === currentFilter) : sJson.data;
+
+  if (!filtered.length) {
+    el.innerHTML = '<div class="muted" style="font-size:13px">No searches match the selected destination.</div>';
     return;
   }
-  el.innerHTML = sJson.data.map((s, i) => `
+  el.innerHTML = filtered.map((s, _) => {
+    const i = sJson.data.indexOf(s);
+    return `
     <div class="sc">
       <div class="sc-head" onclick="toggleSC(${i})">
         <div>
@@ -413,7 +438,8 @@ function renderSearches() {
           <button class="btn btn-primary btn-sm" onclick="saveAllSearches()">💾 Save Changes</button>
         </div>
       </div>
-    </div>`).join('');
+    </div>`;
+  }).join('');
 }
 
 function datePairRow(si, pi, v0, v1) {
