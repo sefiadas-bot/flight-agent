@@ -45,88 +45,84 @@ def parse_hour(time_str):
             continue
     return None
 
-def click_field(page, selectors, text=None, timeout=5000):
-    """Try multiple selectors until one works, then optionally fill text."""
-    for sel in selectors:
+def extract_prices(page):
+    """Extract all price+time pairs visible on the current Google Flights page."""
+    deals_raw = []
+    try:
+        cards = page.locator("li").all()
+        for card in cards:
+            try:
+                text = card.inner_text()
+                price = parse_price(text)
+                if price is None or price < 50 or price > 5000:
+                    continue
+                times = re.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM)', text, re.IGNORECASE)
+                stops = 0 if re.search(r'nonstop', text, re.IGNORECASE) else (
+                    int(m.group(1)) if (m := re.search(r'(\d+)\s+stop', text, re.IGNORECASE)) else "?")
+                dur = re.search(r'(\d+)\s*hr?\s*(?:(\d+)\s*min?)?', text, re.IGNORECASE)
+                airline = next((l.strip() for l in text.splitlines()
+                                if l.strip() and not re.search(r'[\$\d:]', l) and len(l.strip()) > 2), "?")
+                deals_raw.append({
+                    "price":     price,
+                    "airline":   airline,
+                    "departure": times[0] if times else "",
+                    "arrival":   times[1] if len(times) > 1 else "",
+                    "duration":  f"{dur.group(1)}h {dur.group(2) or '0'}m" if dur else "?",
+                    "stops":     stops,
+                })
+            except Exception:
+                continue
+    except Exception:
+        pass
+    return deals_raw
+
+
+def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
+    url = build_google_url(origin, destination, outbound_date, return_date)
+    deals_raw = []
+    page = browser.new_page()
+    try:
+        page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
+
+        # Step 1 — load outbound selection page
+        page.goto(url, wait_until="networkidle", timeout=45000)
+        page.wait_for_timeout(4000)
+
+        # Dismiss consent dialog if present
+        for label in ["Accept all", "Reject all", "I agree"]:
+            try:
+                page.locator(f"button:has-text('{label}')").first.click(timeout=1000)
+                page.wait_for_timeout(500)
+                break
+            except Exception:
+                pass
+
+        # Step 2 — click the first (cheapest) outbound to reveal round-trip prices
         try:
-            el = page.locator(sel).first
-            el.wait_for(state="visible", timeout=timeout)
-            el.click()
-            if text is not None:
-                el.fill(text)
-            return el
+            page.locator("li").first.click(timeout=5000)
+            page.wait_for_timeout(4000)
         except Exception:
+            pass
+
+        deals_raw = extract_prices(page)
+    finally:
+        page.close()
+
+    # Filter and deduplicate
+    deals = []
+    seen = set()
+    for d in sorted(deals_raw, key=lambda x: x["price"]):
+        if d["price"] > max_price:
             continue
-    raise Exception(f"None of these selectors worked: {selectors}")
-
-
-def fill_search_form(page, origin, destination, outbound_date, return_date):
-    """Navigate Google Flights by filling the search form like a real user."""
-    page.goto("https://www.google.com/travel/flights?hl=en&curr=USD",
-              wait_until="networkidle", timeout=60000)
-    page.wait_for_timeout(3000)
-
-    # Dismiss cookie consent if present
-    for label in ["Accept all", "Reject all", "I agree", "Accept"]:
-        try:
-            page.locator(f"button:has-text('{label}')").first.click(timeout=1500)
-            page.wait_for_timeout(800)
-            break
-        except Exception:
-            pass
-
-    # --- Origin ---
-    click_field(page, [
-        '[placeholder="Where from?"]',
-        '[placeholder="Leaving from?"]',
-        '[aria-label="Where from?"]',
-        '[aria-label="Leaving from?"]',
-        'input[aria-autocomplete="list"]',
-    ], text=origin)
-    page.wait_for_timeout(1500)
-    page.keyboard.press("ArrowDown")
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(1000)
-
-    # --- Destination ---
-    click_field(page, [
-        '[placeholder="Where to?"]',
-        '[placeholder="Going to?"]',
-        '[aria-label="Where to?"]',
-        '[aria-label="Going to?"]',
-        '[aria-label="Destination"]',
-    ], text=destination)
-    page.wait_for_timeout(1500)
-    page.keyboard.press("ArrowDown")
-    page.keyboard.press("Enter")
-    page.wait_for_timeout(1000)
-
-    # --- Outbound date ---
-    click_field(page, [
-        '[placeholder="Departure"]',
-        '[aria-label="Departure"]',
-        '[placeholder="Outbound date"]',
-    ])
-    page.keyboard.type(outbound_date, delay=60)
-    page.wait_for_timeout(800)
-
-    # --- Return date ---
-    click_field(page, [
-        '[placeholder="Return"]',
-        '[aria-label="Return"]',
-        '[placeholder="Return date"]',
-    ])
-    page.keyboard.type(return_date, delay=60)
-    page.wait_for_timeout(800)
-
-    # Done / Search
-    for btn in ["Done", "Search"]:
-        try:
-            page.locator(f"button:has-text('{btn}')").first.click(timeout=3000)
-            page.wait_for_timeout(500)
-        except Exception:
-            pass
-    page.wait_for_timeout(8000)
+        if max_depart_hour is not None and d["departure"]:
+            h = parse_hour(d["departure"])
+            if h is not None and h > max_depart_hour:
+                continue
+        key = (d["price"], d["departure"])
+        if key not in seen:
+            seen.add(key)
+            deals.append(d)
+    return deals
 
 
 def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
