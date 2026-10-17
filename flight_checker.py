@@ -45,17 +45,78 @@ def parse_hour(time_str):
             continue
     return None
 
-def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
-    url = build_google_url(origin, destination, outbound_date, return_date)
-    deals = []
+def fill_search_form(page, origin, destination, outbound_date, return_date):
+    """Navigate Google Flights by filling the search form like a real user."""
+    page.goto("https://www.google.com/travel/flights?hl=en&curr=USD",
+              wait_until="domcontentloaded", timeout=30000)
+    page.wait_for_timeout(2000)
 
+    # Dismiss cookie consent if present
+    for label in ["Accept all", "Reject all", "I agree"]:
+        try:
+            page.locator(f"button:has-text('{label}')").first.click(timeout=1500)
+            page.wait_for_timeout(800)
+            break
+        except Exception:
+            pass
+
+    # Ensure "Round trip" is selected (click the trip-type selector)
+    try:
+        page.locator("text=Round trip").first.click(timeout=3000)
+    except Exception:
+        pass  # Already round trip or selector not found
+
+    # --- Origin ---
+    origin_box = page.locator('[placeholder="Where from?"]').first
+    origin_box.click()
+    origin_box.triple_click()
+    origin_box.type(origin, delay=80)
+    page.wait_for_timeout(1200)
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+
+    # --- Destination ---
+    dest_box = page.locator('[placeholder="Where to?"]').first
+    dest_box.click()
+    dest_box.type(destination, delay=80)
+    page.wait_for_timeout(1200)
+    page.keyboard.press("ArrowDown")
+    page.keyboard.press("Enter")
+    page.wait_for_timeout(800)
+
+    # --- Outbound date ---
+    # Click the departure date field
+    page.locator('[placeholder="Departure"]').first.click(timeout=5000)
+    page.wait_for_timeout(600)
+    # Type the date
+    page.keyboard.type(outbound_date, delay=60)
+    page.wait_for_timeout(600)
+
+    # --- Return date ---
+    page.locator('[placeholder="Return"]').first.click(timeout=5000)
+    page.wait_for_timeout(600)
+    page.keyboard.type(return_date, delay=60)
+    page.wait_for_timeout(600)
+
+    # Hit Done / Search
+    try:
+        page.locator("button:has-text('Done')").first.click(timeout=3000)
+        page.wait_for_timeout(500)
+    except Exception:
+        pass
+    page.locator("button:has-text('Search')").first.click(timeout=5000)
+    page.wait_for_timeout(8000)   # wait for results
+
+
+def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
+    deals = []
     page = browser.new_page()
     try:
         page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
-        page.goto(url, wait_until="networkidle", timeout=60000)
-        page.wait_for_timeout(6000)
+        fill_search_form(page, origin, destination, outbound_date, return_date)
 
-        # Each flight result is a list item
+        # Results are in list items — collect all text blocks
         cards = page.locator("li").all()
         for card in cards:
             try:
@@ -64,7 +125,6 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
                 if price is None or price > max_price or price < 50:
                     continue
 
-                # Parse times — first two HH:MM AM/PM matches = depart / arrive
                 times = re.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM)', text, re.IGNORECASE)
                 dep_time = times[0] if times else ""
                 arr_time = times[1] if len(times) > 1 else ""
@@ -74,7 +134,6 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
                     if h is not None and h > max_depart_hour:
                         continue
 
-                # Stops: look for "Nonstop" or "1 stop"
                 stops = "?"
                 if re.search(r'nonstop', text, re.IGNORECASE):
                     stops = 0
@@ -83,11 +142,9 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
                     if sm:
                         stops = int(sm.group(1))
 
-                # Duration
                 dur_m = re.search(r'(\d+)\s*hr?\s*(?:(\d+)\s*min?)?', text, re.IGNORECASE)
                 duration = f"{dur_m.group(1)}h {dur_m.group(2) or '0'}m" if dur_m else "?"
 
-                # Airline — first non-empty line that looks like an airline name
                 airline = "?"
                 for line in text.splitlines():
                     line = line.strip()
@@ -96,19 +153,15 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
                         break
 
                 deals.append({
-                    "price":     price,
-                    "airline":   airline,
-                    "departure": dep_time,
-                    "arrival":   arr_time,
-                    "duration":  duration,
-                    "stops":     stops,
+                    "price": price, "airline": airline,
+                    "departure": dep_time, "arrival": arr_time,
+                    "duration": duration, "stops": stops,
                 })
             except Exception:
                 continue
     finally:
         page.close()
 
-    # Deduplicate by price+departure
     seen, unique = set(), []
     for d in sorted(deals, key=lambda x: x["price"]):
         key = (d["price"], d["departure"])
