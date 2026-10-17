@@ -69,8 +69,7 @@ def fill_search_form(page, origin, destination, outbound_date, return_date):
     # --- Origin ---
     origin_box = page.locator('[placeholder="Where from?"]').first
     origin_box.click()
-    origin_box.triple_click()
-    origin_box.type(origin, delay=80)
+    origin_box.fill(origin)
     page.wait_for_timeout(1200)
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
@@ -79,7 +78,7 @@ def fill_search_form(page, origin, destination, outbound_date, return_date):
     # --- Destination ---
     dest_box = page.locator('[placeholder="Where to?"]').first
     dest_box.click()
-    dest_box.type(destination, delay=80)
+    dest_box.fill(destination)
     page.wait_for_timeout(1200)
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
