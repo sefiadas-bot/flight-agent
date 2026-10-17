@@ -1,2 +1,2 @@
-amadeus
+playwright
 requests
