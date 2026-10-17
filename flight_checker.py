@@ -45,14 +45,29 @@ def parse_hour(time_str):
             continue
     return None
 
+def click_field(page, selectors, text=None, timeout=5000):
+    """Try multiple selectors until one works, then optionally fill text."""
+    for sel in selectors:
+        try:
+            el = page.locator(sel).first
+            el.wait_for(state="visible", timeout=timeout)
+            el.click()
+            if text is not None:
+                el.fill(text)
+            return el
+        except Exception:
+            continue
+    raise Exception(f"None of these selectors worked: {selectors}")
+
+
 def fill_search_form(page, origin, destination, outbound_date, return_date):
     """Navigate Google Flights by filling the search form like a real user."""
     page.goto("https://www.google.com/travel/flights?hl=en&curr=USD",
-              wait_until="domcontentloaded", timeout=30000)
-    page.wait_for_timeout(2000)
+              wait_until="networkidle", timeout=60000)
+    page.wait_for_timeout(3000)
 
     # Dismiss cookie consent if present
-    for label in ["Accept all", "Reject all", "I agree"]:
+    for label in ["Accept all", "Reject all", "I agree", "Accept"]:
         try:
             page.locator(f"button:has-text('{label}')").first.click(timeout=1500)
             page.wait_for_timeout(800)
@@ -60,52 +75,58 @@ def fill_search_form(page, origin, destination, outbound_date, return_date):
         except Exception:
             pass
 
-    # Ensure "Round trip" is selected (click the trip-type selector)
-    try:
-        page.locator("text=Round trip").first.click(timeout=3000)
-    except Exception:
-        pass  # Already round trip or selector not found
-
     # --- Origin ---
-    origin_box = page.locator('[placeholder="Where from?"]').first
-    origin_box.click()
-    origin_box.fill(origin)
-    page.wait_for_timeout(1200)
+    click_field(page, [
+        '[placeholder="Where from?"]',
+        '[placeholder="Leaving from?"]',
+        '[aria-label="Where from?"]',
+        '[aria-label="Leaving from?"]',
+        'input[aria-autocomplete="list"]',
+    ], text=origin)
+    page.wait_for_timeout(1500)
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    page.wait_for_timeout(1000)
 
     # --- Destination ---
-    dest_box = page.locator('[placeholder="Where to?"]').first
-    dest_box.click()
-    dest_box.fill(destination)
-    page.wait_for_timeout(1200)
+    click_field(page, [
+        '[placeholder="Where to?"]',
+        '[placeholder="Going to?"]',
+        '[aria-label="Where to?"]',
+        '[aria-label="Going to?"]',
+        '[aria-label="Destination"]',
+    ], text=destination)
+    page.wait_for_timeout(1500)
     page.keyboard.press("ArrowDown")
     page.keyboard.press("Enter")
-    page.wait_for_timeout(800)
+    page.wait_for_timeout(1000)
 
     # --- Outbound date ---
-    # Click the departure date field
-    page.locator('[placeholder="Departure"]').first.click(timeout=5000)
-    page.wait_for_timeout(600)
-    # Type the date
+    click_field(page, [
+        '[placeholder="Departure"]',
+        '[aria-label="Departure"]',
+        '[placeholder="Outbound date"]',
+    ])
     page.keyboard.type(outbound_date, delay=60)
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(800)
 
     # --- Return date ---
-    page.locator('[placeholder="Return"]').first.click(timeout=5000)
-    page.wait_for_timeout(600)
+    click_field(page, [
+        '[placeholder="Return"]',
+        '[aria-label="Return"]',
+        '[placeholder="Return date"]',
+    ])
     page.keyboard.type(return_date, delay=60)
-    page.wait_for_timeout(600)
+    page.wait_for_timeout(800)
 
-    # Hit Done / Search
-    try:
-        page.locator("button:has-text('Done')").first.click(timeout=3000)
-        page.wait_for_timeout(500)
-    except Exception:
-        pass
-    page.locator("button:has-text('Search')").first.click(timeout=5000)
-    page.wait_for_timeout(8000)   # wait for results
+    # Done / Search
+    for btn in ["Done", "Search"]:
+        try:
+            page.locator(f"button:has-text('{btn}')").first.click(timeout=3000)
+            page.wait_for_timeout(500)
+        except Exception:
+            pass
+    page.wait_for_timeout(8000)
 
 
 def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
