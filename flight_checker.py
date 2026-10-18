@@ -84,9 +84,8 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
     try:
         page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
 
-        # Step 1 — load outbound selection page
-        page.goto(url, wait_until="networkidle", timeout=45000)
-        page.wait_for_timeout(4000)
+        # Load page — domcontentloaded is faster and sufficient; networkidle hangs on SPAs
+        page.goto(url, wait_until="domcontentloaded", timeout=20000)
 
         # Dismiss consent dialog if present
         for label in ["Accept all", "Reject all", "I agree"]:
@@ -97,20 +96,15 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
             except Exception:
                 pass
 
-        # Wait for price elements to actually render (SPA loads data after networkidle)
+        # Wait for prices to render (up to 10s)
         try:
-            page.wait_for_selector("text=/\\$\\d+/", timeout=15000)
+            page.wait_for_selector("text=/\\$\\d+/", timeout=10000)
         except Exception:
             pass
 
         deals_raw = extract_prices(page)
 
-        # Retry once with a longer wait if nothing found yet
-        if not deals_raw:
-            page.wait_for_timeout(6000)
-            deals_raw = extract_prices(page)
-
-        # Save debug screenshot if still empty (uploaded as CI artifact)
+        # Save debug screenshot if empty (uploaded as CI artifact)
         if not deals_raw:
             shot = f"debug_{origin}_{destination}_{outbound_date}.png"
             page.screenshot(path=shot, full_page=True)
