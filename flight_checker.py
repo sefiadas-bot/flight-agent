@@ -77,10 +77,10 @@ def extract_prices(page):
     return deals_raw
 
 
-def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
+def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, context):
     url = build_google_url(origin, destination, outbound_date, return_date)
     deals_raw = []
-    page = browser.new_page()
+    page = context.new_page()
     try:
         page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
 
@@ -166,8 +166,23 @@ def main():
     with sync_playwright() as p:
         browser = p.chromium.launch(
             headless=True,
-            args=["--no-sandbox", "--disable-dev-shm-usage"]
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ]
         )
+        context = browser.new_context(
+            user_agent=(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/131.0.0.0 Safari/537.36"
+            ),
+            locale="en-US",
+            timezone_id="America/New_York",
+        )
+        # Hide webdriver fingerprint
+        context.add_init_script("Object.defineProperty(navigator,'webdriver',{get:()=>undefined})")
 
         for search in searches:
             origin          = search["origin"]
@@ -186,7 +201,7 @@ def main():
                 print(f"  Checking {outbound_date} / {return_date} ...")
                 try:
                     found = find_deals(origin, destination, outbound_date, return_date,
-                                       max_price, max_depart_hour, browser)
+                                       max_price, max_depart_hour, context)
                     route_deals.extend(found)
                     print(f"    -> {len(found)} deal(s)")
                 except Exception as e:
@@ -222,6 +237,7 @@ def main():
             else:
                 summary.append(f"❌ {route_line}")
 
+        context.close()
         browser.close()
 
     summary.append("\n🎉 Book now — prices change fast!" if any_deals else "\n😔 No deals today.")
