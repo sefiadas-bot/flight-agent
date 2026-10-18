@@ -97,14 +97,24 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
             except Exception:
                 pass
 
-        # The outbound selection page already shows round-trip prices — extract here.
-        # (Clicking into return selection adds complexity and often gives 0 results.)
+        # Wait for price elements to actually render (SPA loads data after networkidle)
+        try:
+            page.wait_for_selector("text=/\\$\\d+/", timeout=15000)
+        except Exception:
+            pass
+
         deals_raw = extract_prices(page)
 
-        # If nothing found, try waiting longer and retry once (slow connection / lazy load)
+        # Retry once with a longer wait if nothing found yet
         if not deals_raw:
-            page.wait_for_timeout(5000)
+            page.wait_for_timeout(6000)
             deals_raw = extract_prices(page)
+
+        # Save debug screenshot if still empty (uploaded as CI artifact)
+        if not deals_raw:
+            shot = f"debug_{origin}_{destination}_{outbound_date}.png"
+            page.screenshot(path=shot, full_page=True)
+            print(f"    -> no results; screenshot saved: {shot}")
     finally:
         page.close()
 
