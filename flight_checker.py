@@ -84,7 +84,7 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
     try:
         page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
 
-        # Load page — domcontentloaded is faster and sufficient; networkidle hangs on SPAs
+        # Load page - domcontentloaded is faster and sufficient; networkidle hangs on SPAs
         page.goto(url, wait_until="domcontentloaded", timeout=20000)
 
         # Dismiss consent dialog if present
@@ -150,11 +150,11 @@ def main():
         else:
             searches.append(s)
 
-    print(f"Loaded {len(raw_searches)} config(s) → {len(searches)} search(es).")
+    print(f"Loaded {len(raw_searches)} config(s) -> {len(searches)} search(es).")
 
     today         = datetime.now().strftime("%d %b %Y")
     any_deals     = False
-    summary       = [f"Flight Check — {today}\n"]
+    summary       = [f"Flight Check - {today}\n"]
     deal_sections = []
 
     with sync_playwright() as p:
@@ -204,44 +204,44 @@ def main():
                 time.sleep(2)
 
             route_deals = sorted(route_deals, key=lambda x: x["price"])
-            date_strs   = ", ".join(f"{o}→{r}" for o, r in date_pairs)
-            route_line  = f"{origin} → {destination} (max ${max_price}) | {date_strs}"
+            date_strs   = ", ".join(f"{o}->{r}" for o, r in date_pairs)
+            route_line  = f"{origin} -> {destination} (max ${max_price}) | {date_strs}"
 
             if route_deals:
                 any_deals = True
                 best = route_deals[0]
                 summary.append(
-                    f"✅ {route_line}\n"
+                    f"OK {route_line}\n"
                     f"   Best: ${best['price']} | {best['airline']} | "
-                    f"{best['departure']}→{best['arrival']} | {best['stops']} stop(s)"
+                    f"{best['departure']}->{best['arrival']} | {best['stops']} stop(s)"
                 )
-                section = [f"{'='*55}", f"✈  {origin} → {destination}  |  max ${max_price}", f"{'='*55}"]
+                section = [f"{'='*55}", f"~  {origin} -> {destination}  |  max ${max_price}", f"{'='*55}"]
                 for i, d in enumerate(route_deals, 1):
                     url = build_google_url(origin, destination, outbound_date, return_date)
                     section.append(
                         f"\n#{i}  ${d['price']} round trip\n"
                         f"    Airline  : {d['airline']}\n"
-                        f"    Depart   : {d['departure']}  →  Arrive: {d['arrival']}\n"
+                        f"    Depart   : {d['departure']}  ->  Arrive: {d['arrival']}\n"
                         f"    Duration : {d['duration']}  |  Stops: {d['stops']}\n"
                         f"    Book     : {url}\n"
                     )
                 deal_sections.append("\n".join(section))
             elif errors:
-                summary.append(f"⚠️  {route_line}\n   Error: {errors[0]}")
+                summary.append(f"!!  {route_line}\n   Error: {errors[0]}")
             else:
-                summary.append(f"❌ {route_line}")
+                summary.append(f"NO {route_line}")
 
         context.close()
         browser.close()
 
-    summary.append("\n🎉 Book now — prices change fast!" if any_deals else "\n😔 No deals today.")
+    summary.append("\n** Book now - prices change fast!" if any_deals else "\n// No deals today.")
     body = "\n\n".join(summary)
     if deal_sections:
         body += "\n\n\n" + "\n\n".join(deal_sections)
 
-    subject = f"✈ Flight Deals Found — {today}" if any_deals else f"✈ No Deals Today — {today}"
+    subject = f"~ Flight Deals Found - {today}" if any_deals else f"~ No Deals Today - {today}"
     send_email(subject, body)
-    print(f"\nEmail sent → {EMAIL_TO}")
+    print(f"\nEmail sent -> {EMAIL_TO}")
 
 if __name__ == "__main__":
     main()
