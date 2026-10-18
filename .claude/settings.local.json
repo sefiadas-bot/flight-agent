@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python server.py)",
+      "Bash(curl -s http://localhost:8080/)",
+      "Bash(kill %1)",
+      "Bash(echo \"exit:$?\")"
+    ]
+  }
+}
