@@ -97,14 +97,14 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
             except Exception:
                 pass
 
-        # Step 2 — click the first (cheapest) outbound to reveal round-trip prices
-        try:
-            page.locator("li").first.click(timeout=5000)
-            page.wait_for_timeout(4000)
-        except Exception:
-            pass
-
+        # The outbound selection page already shows round-trip prices — extract here.
+        # (Clicking into return selection adds complexity and often gives 0 results.)
         deals_raw = extract_prices(page)
+
+        # If nothing found, try waiting longer and retry once (slow connection / lazy load)
+        if not deals_raw:
+            page.wait_for_timeout(5000)
+            deals_raw = extract_prices(page)
     finally:
         page.close()
 
