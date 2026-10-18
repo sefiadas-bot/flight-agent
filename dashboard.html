@@ -128,7 +128,7 @@ hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
   <!-- HEADER -->
   <header>
     <div>
-      <h1>✈ Flight <span>Agent</span></h1>
+      <h1>✈ Flight <span>Agent</span> <span id="mode-badge" style="font-size:11px;font-weight:500;padding:2px 8px;border-radius:20px;background:rgba(63,185,80,.15);color:var(--green);display:none">Local</span></h1>
       <div class="header-sub" id="last-run-summary">Loading…</div>
     </div>
     <div class="flex gap-8 items-center">
@@ -236,6 +236,7 @@ hr { border:none; border-top:1px solid var(--border); margin:12px 0; }
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────────
+const IS_LOCAL = ['localhost', '127.0.0.1'].includes(location.hostname);
 const getToken = () => localStorage.getItem('gh_token') || '';
 const getRepo  = () => localStorage.getItem('gh_repo')  || 'sefiadas-bot/flight-agent';
 
@@ -282,6 +283,12 @@ let sJson = { sha: null, data: [] };
 let sYaml = { sha: null, content: '' };
 
 async function fetchSearches() {
+  if (IS_LOCAL) {
+    const r = await fetch('/api/searches');
+    if (!r.ok) throw new Error('Could not load searches.json');
+    sJson.data = await r.json();
+    return sJson.data;
+  }
   const d = await ghFetch('GET', '/contents/searches.json');
   sJson.sha  = d.sha;
   sJson.data = JSON.parse(atob(d.content.replace(/\s/g, '')));
@@ -289,6 +296,16 @@ async function fetchSearches() {
 }
 
 async function pushSearches(searches) {
+  if (IS_LOCAL) {
+    const r = await fetch('/api/searches', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(searches)
+    });
+    if (!r.ok) throw new Error('Failed to save searches.json');
+    sJson.data = searches;
+    return;
+  }
   const d = await ghFetch('PUT', '/contents/searches.json', {
     message: 'Update searches via dashboard',
     content: btoa(unescape(encodeURIComponent(JSON.stringify(searches, null, 2) + '\n'))),
@@ -299,6 +316,12 @@ async function pushSearches(searches) {
 }
 
 async function fetchWorkflow() {
+  if (IS_LOCAL) {
+    const r = await fetch('/api/workflow');
+    if (!r.ok) throw new Error('Could not load main.yml');
+    sYaml.content = await r.text();
+    return sYaml.content;
+  }
   const d = await ghFetch('GET', '/contents/.github/workflows/main.yml');
   sYaml.sha     = d.sha;
   sYaml.content = atob(d.content.replace(/\s/g, ''));
@@ -306,6 +329,16 @@ async function fetchWorkflow() {
 }
 
 async function pushWorkflow(content) {
+  if (IS_LOCAL) {
+    const r = await fetch('/api/workflow', {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
+      body: content
+    });
+    if (!r.ok) throw new Error('Failed to save main.yml');
+    sYaml.content = content;
+    return;
+  }
   const d = await ghFetch('PUT', '/contents/.github/workflows/main.yml', {
     message: 'Update schedule via dashboard',
     content: btoa(unescape(encodeURIComponent(content))),
@@ -366,6 +399,11 @@ function conclusionBadge(c) {
 }
 
 async function loadRuns() {
+  if (IS_LOCAL) {
+    document.getElementById('runs-list').innerHTML = '<span class="muted">Local mode — run manually: <code>python flight_checker.py</code></span>';
+    document.getElementById('last-run-summary').textContent = 'Local mode';
+    return;
+  }
   try {
     const d = await ghFetch('GET', '/actions/runs?per_page=6');
     const runs = d.workflow_runs;
@@ -548,12 +586,13 @@ async function saveNewSearch() {
 
 // ── Run Now ───────────────────────────────────────────────────────────────────
 async function triggerRun() {
+  if (IS_LOCAL) { toast('Local mode — run: python flight_checker.py', 'ok'); return; }
   const btn = document.getElementById('run-btn');
   btn.disabled = true;
   btn.innerHTML = '<span class="spin"></span> Running…';
   try {
     await ghFetch('POST', '/actions/workflows/main.yml/dispatches', { ref: 'main' });
-    toast('Workflow triggered! Check Telegram in ~1 min.', 'ok');
+    toast('Workflow triggered! Check your email in ~2 min.', 'ok');
     setTimeout(loadRuns, 5000);
   } catch(e) { toast('Error: ' + e.message, 'err'); }
   finally { setTimeout(() => { btn.disabled = false; btn.innerHTML = '▶ Run Now'; }, 6000); }
@@ -571,6 +610,15 @@ function toast(msg, type) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 async function loadAll() {
+  if (IS_LOCAL) {
+    document.getElementById('settings-panel').style.display = 'none';
+    try {
+      const [searches, yaml] = await Promise.all([fetchSearches(), fetchWorkflow(), loadRuns()]);
+      setCronDisplay(parseCron(yaml));
+      renderSearches();
+    } catch(e) { toast('Load error: ' + e.message, 'err'); }
+    return;
+  }
   if (!getToken()) {
     document.getElementById('settings-panel').style.display = 'block';
     document.getElementById('gh-token').value = getToken();
@@ -589,6 +637,7 @@ async function loadAll() {
   }
 }
 
+if (IS_LOCAL) document.getElementById('mode-badge').style.display = 'inline';
 loadAll();
 </script>
 </body>
