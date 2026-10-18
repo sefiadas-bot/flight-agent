@@ -18,6 +18,7 @@ jobs:
           EMAIL_FROM:         ${{ secrets.EMAIL_FROM }}
           EMAIL_TO:           ${{ secrets.EMAIL_TO }}
           EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
+          PYTHONUTF8:         "1"
         run: python flight_checker.py
       - name: Upload debug screenshots
         if: always()
