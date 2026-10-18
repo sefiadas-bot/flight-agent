@@ -125,67 +125,6 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
     return deals
 
 
-def find_deals(origin, destination, outbound_date, return_date, max_price, max_depart_hour, browser):
-    deals = []
-    page = browser.new_page()
-    try:
-        page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
-        fill_search_form(page, origin, destination, outbound_date, return_date)
-
-        # Results are in list items — collect all text blocks
-        cards = page.locator("li").all()
-        for card in cards:
-            try:
-                text = card.inner_text()
-                price = parse_price(text)
-                if price is None or price > max_price or price < 50:
-                    continue
-
-                times = re.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM)', text, re.IGNORECASE)
-                dep_time = times[0] if times else ""
-                arr_time = times[1] if len(times) > 1 else ""
-
-                if max_depart_hour is not None and dep_time:
-                    h = parse_hour(dep_time)
-                    if h is not None and h > max_depart_hour:
-                        continue
-
-                stops = "?"
-                if re.search(r'nonstop', text, re.IGNORECASE):
-                    stops = 0
-                else:
-                    sm = re.search(r'(\d+)\s+stop', text, re.IGNORECASE)
-                    if sm:
-                        stops = int(sm.group(1))
-
-                dur_m = re.search(r'(\d+)\s*hr?\s*(?:(\d+)\s*min?)?', text, re.IGNORECASE)
-                duration = f"{dur_m.group(1)}h {dur_m.group(2) or '0'}m" if dur_m else "?"
-
-                airline = "?"
-                for line in text.splitlines():
-                    line = line.strip()
-                    if line and not re.search(r'[\$\d:]', line) and len(line) > 2:
-                        airline = line
-                        break
-
-                deals.append({
-                    "price": price, "airline": airline,
-                    "departure": dep_time, "arrival": arr_time,
-                    "duration": duration, "stops": stops,
-                })
-            except Exception:
-                continue
-    finally:
-        page.close()
-
-    seen, unique = set(), []
-    for d in sorted(deals, key=lambda x: x["price"]):
-        key = (d["price"], d["departure"])
-        if key not in seen:
-            seen.add(key)
-            unique.append(d)
-    return unique
-
 def send_email(subject, body):
     msg = MIMEMultipart()
     msg["Subject"] = subject
