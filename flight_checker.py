@@ -135,7 +135,9 @@ def send_email(subject, body):
     msg["From"]    = EMAIL_FROM
     msg["To"]      = EMAIL_TO
     msg.attach(MIMEText(body, "plain", "utf-8"))
-    with smtplib.SMTP_SSL("smtp.gmail.com", 465) as server:
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.ehlo()
+        server.starttls()
         server.login(EMAIL_FROM, EMAIL_APP_PASSWORD)
         server.send_message(msg)
 
