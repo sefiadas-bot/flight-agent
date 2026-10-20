@@ -107,7 +107,7 @@ def find_deals(origin, destination, outbound_date, return_date, max_price, max_d
         # Save debug screenshot if empty (uploaded as CI artifact)
         if not deals_raw:
             shot = f"debug_{origin}_{destination}_{outbound_date}.png"
-            page.screenshot(path=shot, full_page=True)
+            page.screenshot(path=shot, full_page=True, timeout=5000)
             print(f"    -> no results; screenshot saved: {shot}")
     finally:
         page.close()
