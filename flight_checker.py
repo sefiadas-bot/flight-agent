@@ -358,6 +358,12 @@ def build_notification_body(today, summary_lines, deal_sections):
     return "\n".join(parts)
 
 
+def _rfc2047(value):
+    """Base64-encode a header value so non-ASCII characters are safe to send."""
+    import base64
+    return f"=?utf-8?b?{base64.b64encode(value.encode('utf-8')).decode('ascii')}?="
+
+
 def send_ntfy(title, body, priority="default", click_url=None):
     """POST a notification to ntfy.sh over HTTPS (port 443)."""
     cfg = _cfg()
@@ -369,7 +375,7 @@ def send_ntfy(title, body, priority="default", click_url=None):
         body_bytes = body.encode("utf-8")[:3900] + "\n\u2026(truncated)".encode("utf-8")
 
     req = urllib.request.Request(url, data=body_bytes, method="POST")
-    req.add_header("Title", title)
+    req.add_header("Title", _rfc2047(title))
     req.add_header("Priority", priority)
     req.add_header("Tags", "airplane,ticket")
     if click_url:
