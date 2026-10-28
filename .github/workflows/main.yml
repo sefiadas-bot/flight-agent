@@ -1,28 +1,58 @@
 name: Daily Flight Check
+
+# Runs daily at 05:00 UTC (08:00 Israel time, UTC+3).
+# Trigger manually via "Run workflow" in the Actions tab or the dashboard.
 on:
   schedule:
     - cron: '0 5 * * *'
   workflow_dispatch:
+
 jobs:
   check-flights:
     runs-on: self-hosted
     timeout-minutes: 30
+    # Prevent two runs from overlapping (e.g. a manual trigger during a scheduled run)
+    concurrency:
+      group: flight-check
+      cancel-in-progress: false
+
     steps:
       - uses: actions/checkout@v4.2.2
         with:
           clean: true
+
       - uses: actions/setup-python@v5.3.0
         with:
           python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - run: playwright install chromium --with-deps
-      - name: Run
+
+      # Restore deduplication state from the previous run.
+      # Uses a unique key per run-number so each run saves a fresh snapshot,
+      # while restore-keys picks up the most recent prior snapshot.
+      - name: Restore state cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.flight_agent
+          key: flight-agent-state-${{ github.run_number }}
+          restore-keys: flight-agent-state-
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright browser
+        run: playwright install chromium --with-deps
+
+      - name: Run flight checker
         env:
-          EMAIL_FROM:         ${{ secrets.EMAIL_FROM }}
-          EMAIL_TO:           ${{ secrets.EMAIL_TO }}
-          EMAIL_APP_PASSWORD: ${{ secrets.EMAIL_APP_PASSWORD }}
-          PYTHONUTF8:         "1"
+          # Required secret — configure via Settings > Secrets and variables > Actions
+          NTFY_TOPIC:                   ${{ secrets.NTFY_TOPIC }}
+          # Optional variables — configure via Settings > Secrets and variables > Variables
+          # SEND_NO_DEALS_NOTIFICATION: set to "false" to skip notification when no new deals
+          # MAX_MONTHLY_REQUESTS: hard monthly cap on Playwright page loads (default 2000)
+          SEND_NO_DEALS_NOTIFICATION:   ${{ vars.SEND_NO_DEALS_NOTIFICATION }}
+          MAX_MONTHLY_REQUESTS:         ${{ vars.MAX_MONTHLY_REQUESTS }}
+          PYTHONUTF8:                   "1"
         run: python flight_checker.py
+
       - name: Upload debug screenshots
         if: always()
         uses: actions/upload-artifact@v4

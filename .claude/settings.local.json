@@ -4,7 +4,12 @@
       "Bash(python server.py)",
       "Bash(curl -s http://localhost:8080/)",
       "Bash(kill %1)",
-      "Bash(echo \"exit:$?\")"
+      "Bash(echo \"exit:$?\")",
+      "Bash(pip install:*)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -c \"import playwright; print\\('playwright installed'\\)\")",
+      "Bash(playwright --version)",
+      "Bash(python -m playwright --version)"
     ]
   }
 }

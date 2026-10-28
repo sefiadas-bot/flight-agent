@@ -1,0 +1,26 @@
+# Secrets and local config
+.env
+*.env.local
+
+# Playwright debug output
+debug_*.png
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+.mypy_cache/
+*.egg-info/
+dist/
+build/
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# Editor
+.vscode/
+.idea/
+*.swp
