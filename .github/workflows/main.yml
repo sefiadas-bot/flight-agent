@@ -43,8 +43,9 @@ jobs:
 
       - name: Run flight checker
         env:
-          # Required secret — configure via Settings > Secrets and variables > Actions
-          NTFY_TOPIC:                   ${{ secrets.NTFY_TOPIC }}
+          # Required secrets — configure via Settings > Secrets and variables > Actions
+          TELEGRAM_BOT_TOKEN:           ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:             ${{ secrets.TELEGRAM_CHAT_ID }}
           # Optional variables — configure via Settings > Secrets and variables > Variables
           # SEND_NO_DEALS_NOTIFICATION: set to "false" to skip notification when no new deals
           # MAX_MONTHLY_REQUESTS: hard monthly cap on Playwright page loads (default 2000)

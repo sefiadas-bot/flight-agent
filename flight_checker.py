@@ -64,7 +64,7 @@ EXPLORE_DESTINATIONS = [
 # ---------------------------------------------------------------------------
 # Environment validation  (call once at startup; does not run on import)
 # ---------------------------------------------------------------------------
-REQUIRED_ENV = ["NTFY_TOPIC"]
+REQUIRED_ENV = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"]
 
 
 def validate_env():
@@ -87,8 +87,8 @@ def _cfg():
     ttl_days = int(raw_ttl) if raw_ttl.isdigit() else 60
 
     return {
-        "NTFY_TOPIC": os.environ.get("NTFY_TOPIC", ""),
-        "NTFY_SERVER": os.environ.get("NTFY_SERVER", "https://ntfy.sh"),
+        "TELEGRAM_BOT_TOKEN": os.environ.get("TELEGRAM_BOT_TOKEN", ""),
+        "TELEGRAM_CHAT_ID": os.environ.get("TELEGRAM_CHAT_ID", ""),
         "SEND_NO_DEALS_NOTIFICATION": send_no_deals,
         "MAX_MONTHLY_REQUESTS": max_monthly,
         "DEDUP_TTL_DAYS": ttl_days,
@@ -358,32 +358,35 @@ def build_notification_body(today, summary_lines, deal_sections):
     return "\n".join(parts)
 
 
-def _rfc2047(value):
-    """Base64-encode a header value so non-ASCII characters are safe to send."""
-    import base64
-    return f"=?utf-8?b?{base64.b64encode(value.encode('utf-8')).decode('ascii')}?="
-
-
-def send_ntfy(title, body, priority="default", click_url=None):
-    """POST a notification to ntfy.sh over HTTPS (port 443)."""
+def send_telegram(title, body, click_url=None):
+    """Send a message via Telegram Bot API over HTTPS (port 443)."""
     cfg = _cfg()
-    url = f"{cfg['NTFY_SERVER']}/{cfg['NTFY_TOPIC']}"
+    token = cfg["TELEGRAM_BOT_TOKEN"]
+    chat_id = cfg["TELEGRAM_CHAT_ID"]
 
-    # ntfy free tier: 4096-byte body limit
-    body_bytes = body.encode("utf-8")
-    if len(body_bytes) > 4000:
-        body_bytes = body.encode("utf-8")[:3900] + "\n\u2026(truncated)".encode("utf-8")
-
-    req = urllib.request.Request(url, data=body_bytes, method="POST")
-    req.add_header("Title", _rfc2047(title))
-    req.add_header("Priority", priority)
-    req.add_header("Tags", "airplane,ticket")
+    # Telegram MarkdownV2 requires escaping special chars; use plain HTML instead
+    text = f"<b>{title}</b>\n\n{body}"
     if click_url:
-        req.add_header("Click", click_url)
+        text += f'\n\n<a href="{click_url}">Book now</a>'
+
+    # Telegram max message length is 4096 chars
+    if len(text) > 4000:
+        text = text[:3900] + "\n\u2026(truncated)"
+
+    payload = json.dumps({
+        "chat_id": chat_id,
+        "text": text,
+        "parse_mode": "HTML",
+        "disable_web_page_preview": True,
+    }).encode("utf-8")
+
+    url = f"https://api.telegram.org/bot{token}/sendMessage"
+    req = urllib.request.Request(url, data=payload, method="POST")
+    req.add_header("Content-Type", "application/json")
 
     with urllib.request.urlopen(req, timeout=15) as resp:
-        if resp.status not in (200, 201):
-            raise RuntimeError(f"ntfy returned HTTP {resp.status}")
+        if resp.status != 200:
+            raise RuntimeError(f"Telegram API returned HTTP {resp.status}")
 
 
 # ---------------------------------------------------------------------------
@@ -415,8 +418,8 @@ def _send_report(today, summary_lines, deal_sections, any_new_deals):
         title = f"\u2708 No New Deals \u2013 {today}"
         priority = "min"
 
-    send_ntfy(title, body, priority=priority, click_url=click_url)
-    log.info("Notification sent via ntfy.sh")
+    send_telegram(title, body, click_url=click_url)
+    log.info("Notification sent via Telegram")
 
 
 # ---------------------------------------------------------------------------

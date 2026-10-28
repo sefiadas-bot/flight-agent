@@ -16,7 +16,8 @@ import pytest
 
 # Set dummy env vars BEFORE importing the module so validate_env() isn't
 # needed at import time and module-level code doesn't crash.
-os.environ.setdefault("NTFY_TOPIC", "test-topic-dummy")
+os.environ.setdefault("TELEGRAM_BOT_TOKEN", "123456:dummy-token")
+os.environ.setdefault("TELEGRAM_CHAT_ID", "999999")
 # Ensure optional vars are cleared so defaults are exercised
 os.environ.pop("SEND_NO_DEALS_NOTIFICATION", None)
 os.environ.pop("MAX_MONTHLY_REQUESTS", None)
@@ -366,12 +367,13 @@ class TestFindDealsWithRetry:
 # ---------------------------------------------------------------------------
 
 class TestValidateEnv:
-    def test_passes_with_topic_set(self, monkeypatch):
-        monkeypatch.setenv("NTFY_TOPIC", "my-topic")
+    def test_passes_with_all_vars(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "12345")
         fc.validate_env()  # should not raise
 
-    def test_exits_on_missing_topic(self, monkeypatch):
-        monkeypatch.delenv("NTFY_TOPIC", raising=False)
+    def test_exits_on_missing_token(self, monkeypatch):
+        monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
         with pytest.raises(SystemExit):
             fc.validate_env()
 
@@ -404,10 +406,10 @@ class TestBuildNotificationBody:
 
 
 # ---------------------------------------------------------------------------
-# send_ntfy  (urllib mocked – no real HTTP request sent)
+# send_telegram  (urllib mocked – no real HTTP request sent)
 # ---------------------------------------------------------------------------
 
-class TestSendNtfy:
+class TestSendTelegram:
     def _mock_urlopen(self, status=200):
         mock_resp = MagicMock()
         mock_resp.status = status
@@ -415,47 +417,49 @@ class TestSendNtfy:
         mock_resp.__exit__ = MagicMock(return_value=False)
         return mock_resp
 
-    def test_posts_to_ntfy_server(self, monkeypatch):
-        monkeypatch.setenv("NTFY_TOPIC", "my-topic")
-        monkeypatch.setenv("NTFY_SERVER", "https://ntfy.sh")
+    def test_posts_to_telegram_api(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "999")
         captured = {}
         def fake_urlopen(req, timeout=None):
             captured["url"] = req.full_url
             return self._mock_urlopen()
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            fc.send_ntfy("Title", "body")
-        assert "ntfy.sh/my-topic" in captured["url"]
+            fc.send_telegram("Title", "body")
+        assert "api.telegram.org" in captured["url"]
+        assert "123:abc" in captured["url"]
 
-    def test_sets_title_header(self, monkeypatch):
-        monkeypatch.setenv("NTFY_TOPIC", "my-topic")
+    def test_includes_title_in_body(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "999")
         captured = {}
         def fake_urlopen(req, timeout=None):
-            captured["title"] = req.get_header("Title")
+            captured["data"] = req.data.decode("utf-8")
             return self._mock_urlopen()
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            fc.send_ntfy("My Title", "body")
-        assert captured["title"] == "My Title"
+            fc.send_telegram("My Title", "body text")
+        assert "My Title" in captured["data"]
 
-    def test_truncates_long_body(self, monkeypatch):
-        monkeypatch.setenv("NTFY_TOPIC", "my-topic")
+    def test_truncates_long_message(self, monkeypatch):
+        monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:abc")
+        monkeypatch.setenv("TELEGRAM_CHAT_ID", "999")
         captured = {}
         def fake_urlopen(req, timeout=None):
-            captured["data"] = req.data
+            captured["data"] = req.data.decode("utf-8")
             return self._mock_urlopen()
-        long_body = "x" * 5000
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            fc.send_ntfy("Title", long_body)
-        assert len(captured["data"]) <= 4100  # truncated
+            fc.send_telegram("Title", "x" * 5000)
+        assert len(captured["data"]) < 6000
 
     def test_no_deals_notification_skipped(self, monkeypatch):
         monkeypatch.setenv("SEND_NO_DEALS_NOTIFICATION", "false")
-        with patch("flight_checker.send_ntfy") as mock_send:
+        with patch("flight_checker.send_telegram") as mock_send:
             fc._send_report("27 Oct 2026", [], [], any_new_deals=False)
         mock_send.assert_not_called()
 
     def test_no_deals_notification_sent_when_configured(self, monkeypatch):
         monkeypatch.setenv("SEND_NO_DEALS_NOTIFICATION", "true")
-        with patch("flight_checker.send_ntfy") as mock_send:
+        with patch("flight_checker.send_telegram") as mock_send:
             fc._send_report("27 Oct 2026", [], [], any_new_deals=False)
         mock_send.assert_called_once()
 
