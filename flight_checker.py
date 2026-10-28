@@ -260,28 +260,60 @@ def find_deals(origin, destination, outbound_date, return_date,
     Open one Google Flights page and return a list of matching deals.
     Each deal dict includes outbound_date and return_date for correct URL
     generation later (fixes upstream bug where last loop date was reused).
+
+    Navigation strategy: load the base page first so the React app
+    initialises, then navigate to the hash URL. This prevents Google from
+    serving the homepage when the hash fragment is ignored on cold load.
     """
     url = build_google_url(origin, destination, outbound_date, return_date)
     page = context.new_page()
     deals_raw = []
     try:
-        page.set_extra_http_headers({"Accept-Language": "en-US,en;q=0.9"})
-        page.goto(url, wait_until="domcontentloaded", timeout=20000)
+        page.set_extra_http_headers({
+            "Accept-Language": "en-US,en;q=0.9",
+            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+            "Sec-Fetch-Dest": "document",
+            "Sec-Fetch-Mode": "navigate",
+            "Sec-Fetch-Site": "none",
+            "Sec-Fetch-User": "?1",
+        })
 
-        # Dismiss consent dialog if present
+        # Step 1: load the base page so the React/SPA app initialises fully.
+        # Without this, the hash fragment in the search URL is often ignored
+        # by headless Chromium and Google serves the homepage instead.
+        try:
+            page.goto(
+                "https://www.google.com/travel/flights?hl=en&curr=USD",
+                wait_until="domcontentloaded",
+                timeout=20000,
+            )
+        except Exception:
+            pass
+
+        # Dismiss consent dialog on base page load
         for label in ["Accept all", "Reject all", "I agree"]:
             try:
-                page.locator(f"button:has-text('{label}')").first.click(timeout=1000)
+                page.locator(f"button:has-text('{label}')").first.click(timeout=1500)
                 page.wait_for_timeout(500)
                 break
             except Exception:
                 pass
 
-        # Wait for prices to render (up to 10 s)
+        # Step 2: navigate to the specific search URL (hash fragment now processed
+        # by the already-initialised SPA).
         try:
-            page.wait_for_selector("text=/\\$\\d+/", timeout=10000)
+            page.goto(url, wait_until="domcontentloaded", timeout=20000)
         except Exception:
             pass
+
+        # Wait for flight prices to render (up to 20 s; SPA needs time for API call)
+        try:
+            page.wait_for_selector("text=/\\$\\d+/", timeout=20000)
+        except Exception:
+            pass
+
+        # Small stabilisation pause for dynamic content
+        page.wait_for_timeout(2000)
 
         deals_raw = extract_prices(page)
 
@@ -468,6 +500,8 @@ def main():
                 "--no-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--window-size=1920,1080",
             ],
         )
         context = browser.new_context(
@@ -476,12 +510,16 @@ def main():
                 "AppleWebKit/537.36 (KHTML, like Gecko) "
                 "Chrome/131.0.0.0 Safari/537.36"
             ),
+            viewport={"width": 1920, "height": 1080},
             locale="en-US",
             timezone_id="America/New_York",
         )
-        context.add_init_script(
-            "Object.defineProperty(navigator,'webdriver',{get:()=>undefined})"
-        )
+        context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
+            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+            window.chrome = {runtime: {}};
+        """)
 
         try:
             for search in searches:
