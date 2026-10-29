@@ -217,40 +217,53 @@ def parse_hour(time_str):
 
 
 def extract_prices(page):
-    """Extract all price+flight-detail pairs visible on the current Google Flights page."""
+    """Extract all price+flight-detail pairs visible on the current Google Flights page.
+
+    Tries ``li`` elements first (most common), then ``[role='listitem']`` as a
+    fallback in case Google's markup changes.
+    """
     deals_raw = []
-    try:
-        cards = page.locator("li").all()
-        for card in cards:
-            try:
-                text = card.inner_text()
-                price = parse_price(text)
-                if price is None or price < 50 or price > 5000:
+
+    def _parse_card(text):
+        price = parse_price(text)
+        if price is None or price < 50 or price > 5000:
+            return None
+        times = re.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM)', text, re.IGNORECASE)
+        stops_match = re.search(r'(\d+)\s+stop', text, re.IGNORECASE)
+        stops = (
+            0 if re.search(r'nonstop', text, re.IGNORECASE)
+            else (int(stops_match.group(1)) if stops_match else "?")
+        )
+        dur = re.search(r'(\d+)\s*hr?\s*(?:(\d+)\s*min?)?', text, re.IGNORECASE)
+        airline = next(
+            (ln.strip() for ln in text.splitlines()
+             if ln.strip() and not re.search(r'[\$\d:]', ln) and len(ln.strip()) > 2),
+            "?",
+        )
+        return {
+            "price":     price,
+            "airline":   airline,
+            "departure": times[0] if times else "",
+            "arrival":   times[1] if len(times) > 1 else "",
+            "duration":  f"{dur.group(1)}h {dur.group(2) or '0'}m" if dur else "?",
+            "stops":     stops,
+        }
+
+    for selector in ("li", "[role='listitem']"):
+        try:
+            cards = page.locator(selector).all()
+            for card in cards:
+                try:
+                    deal = _parse_card(card.inner_text())
+                    if deal is not None:
+                        deals_raw.append(deal)
+                except Exception:
                     continue
-                times = re.findall(r'\d{1,2}:\d{2}\s*(?:AM|PM)', text, re.IGNORECASE)
-                stops_match = re.search(r'(\d+)\s+stop', text, re.IGNORECASE)
-                stops = (
-                    0 if re.search(r'nonstop', text, re.IGNORECASE)
-                    else (int(stops_match.group(1)) if stops_match else "?")
-                )
-                dur = re.search(r'(\d+)\s*hr?\s*(?:(\d+)\s*min?)?', text, re.IGNORECASE)
-                airline = next(
-                    (ln.strip() for ln in text.splitlines()
-                     if ln.strip() and not re.search(r'[\$\d:]', ln) and len(ln.strip()) > 2),
-                    "?",
-                )
-                deals_raw.append({
-                    "price":     price,
-                    "airline":   airline,
-                    "departure": times[0] if times else "",
-                    "arrival":   times[1] if len(times) > 1 else "",
-                    "duration":  f"{dur.group(1)}h {dur.group(2) or '0'}m" if dur else "?",
-                    "stops":     stops,
-                })
-            except Exception:
-                continue
-    except Exception:
-        pass
+        except Exception:
+            continue
+        if deals_raw:
+            break  # stop at first selector that produces results
+
     return deals_raw
 
 
@@ -261,9 +274,14 @@ def find_deals(origin, destination, outbound_date, return_date,
     Each deal dict includes outbound_date and return_date for correct URL
     generation later (fixes upstream bug where last loop date was reused).
 
-    Navigation strategy: load the base page first so the React app
-    initialises, then navigate to the hash URL. This prevents Google from
-    serving the homepage when the hash fragment is ignored on cold load.
+    Navigation strategy:
+    1. Load the base Google Flights page so the React SPA initialises and
+       any consent dialogs can be dismissed.
+    2. Navigate to the search URL via ``window.location.href`` (a true
+       client-side hash-router navigation that avoids a full reload) rather
+       than a second ``page.goto()``.  Fall back to ``page.goto()`` if the
+       JS approach raises.
+    3. Wait up to 25 s for prices to render, then extract.
     """
     url = build_google_url(origin, destination, outbound_date, return_date)
     page = context.new_page()
@@ -278,46 +296,81 @@ def find_deals(origin, destination, outbound_date, return_date,
             "Sec-Fetch-User": "?1",
         })
 
-        # Step 1: load the base page so the React/SPA app initialises fully.
-        # Without this, the hash fragment in the search URL is often ignored
-        # by headless Chromium and Google serves the homepage instead.
+        # Step 1: load the base page so the SPA initialises.
         try:
             page.goto(
                 "https://www.google.com/travel/flights?hl=en&curr=USD",
                 wait_until="domcontentloaded",
-                timeout=20000,
+                timeout=25000,
             )
+            page.wait_for_timeout(2000)
         except Exception:
             pass
 
-        # Dismiss consent dialog on base page load
+        # Dismiss consent dialog
         for label in ["Accept all", "Reject all", "I agree"]:
             try:
-                page.locator(f"button:has-text('{label}')").first.click(timeout=1500)
-                page.wait_for_timeout(500)
+                page.locator(f"button:has-text('{label}')").first.click(timeout=2000)
+                page.wait_for_timeout(800)
                 break
             except Exception:
                 pass
 
-        # Step 2: navigate to the specific search URL (hash fragment now processed
-        # by the already-initialised SPA).
+        # Step 2: navigate to the specific search URL.
+        # Using window.location.href triggers the React hash-router natively
+        # (fires popstate/hashchange) without a full page reload, which is
+        # less detectable than a Playwright goto() on the same origin.
+        nav_ok = False
         try:
-            page.goto(url, wait_until="domcontentloaded", timeout=20000)
+            page.evaluate("u => { window.location.href = u; }", url)
+            nav_ok = True
         except Exception:
             pass
 
-        # Wait for flight prices to render (up to 20 s; SPA needs time for API call)
+        if not nav_ok:
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=25000)
+            except Exception:
+                pass
+
+        # Wait for the SPA's async API call to complete and prices to render.
+        # networkidle gives the SPA time to finish XHR/fetch calls.
         try:
-            page.wait_for_selector("text=/\\$\\d+/", timeout=20000)
+            page.wait_for_load_state("networkidle", timeout=15000)
+        except Exception:
+            pass  # networkidle may never fire on pages with polling; that is OK
+
+        prices_visible = False
+        try:
+            page.wait_for_selector("text=/\\$\\d{2,4}/", timeout=25000)
+            prices_visible = True
         except Exception:
             pass
 
-        # Small stabilisation pause for dynamic content
-        page.wait_for_timeout(2000)
+        page.wait_for_timeout(2000)  # extra stabilisation
+
+        # --- diagnostic logging (always) ---
+        try:
+            cur_url = page.url
+            cur_title = page.title()
+            log.info(
+                "  [nav] prices_visible=%s | url=%.90s | title=%.60s",
+                prices_visible, cur_url, cur_title,
+            )
+        except Exception:
+            pass
 
         deals_raw = extract_prices(page)
 
         if not deals_raw:
+            # Log a snippet of page body text to help distinguish
+            # "homepage loaded" from "results loaded but selector wrong"
+            try:
+                snippet = page.inner_text("body")
+                snippet = " ".join(snippet.split())[:400]
+                log.info("  [page-snippet] %s", snippet)
+            except Exception:
+                pass
             shot = f"debug_{origin}_{destination}_{outbound_date}.png"
             try:
                 page.screenshot(path=shot, full_page=True, timeout=5000)
@@ -514,12 +567,121 @@ def main():
             locale="en-US",
             timezone_id="America/New_York",
         )
+        # Comprehensive stealth init script — runs in every page before any
+        # other script.  Patches the most common headless-detection vectors.
         context.add_init_script("""
-            Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
-            Object.defineProperty(navigator, 'plugins', {get: () => [1, 2, 3]});
-            Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
-            window.chrome = {runtime: {}};
-        """)
+// 1. webdriver flag
+Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
+
+// 2. languages
+Object.defineProperty(navigator, 'languages', {get: () => ['en-US', 'en']});
+
+// 3. device memory & hardware concurrency (typical laptop values)
+Object.defineProperty(navigator, 'deviceMemory', {get: () => 8});
+Object.defineProperty(navigator, 'hardwareConcurrency', {get: () => 8});
+
+// 4. connection info
+try {
+    Object.defineProperty(navigator, 'connection', {
+        get: () => ({effectiveType: '4g', type: 'wifi', downlink: 10, rtt: 50, saveData: false}),
+    });
+} catch(e) {}
+
+// 5. realistic plugins (Chrome PDF Plugin / Viewer / Native Client)
+(function() {
+    function makeMime(type, desc, suffix) {
+        return {type, description: desc, suffixes: suffix};
+    }
+    function makePlugin(name, desc, filename, mimes) {
+        const p = Object.create(Plugin.prototype);
+        Object.defineProperty(p, 'name',        {get: () => name});
+        Object.defineProperty(p, 'description', {get: () => desc});
+        Object.defineProperty(p, 'filename',    {get: () => filename});
+        Object.defineProperty(p, 'length',      {get: () => mimes.length});
+        mimes.forEach((m, i) => { p[i] = m; Object.defineProperty(m, 'enabledPlugin', {get: () => p}); });
+        p.item       = i    => p[i] ?? null;
+        p.namedItem  = name => mimes.find(m => m.type === name) ?? null;
+        return p;
+    }
+    const pdf  = makeMime('application/x-google-chrome-pdf', 'Portable Document Format', 'pdf');
+    const nacl = makeMime('application/x-nacl', 'Native Client Executable', '');
+    const pnacl= makeMime('application/x-pnacl', 'Portable Native Client Executable', '');
+    const plugins = [
+        makePlugin('Chrome PDF Plugin',  'Portable Document Format', 'internal-pdf-viewer', [pdf]),
+        makePlugin('Chrome PDF Viewer',  '',                          'mhjfbmdgcfjbbpaeojofohoefgiehjai', [pdf]),
+        makePlugin('Native Client',      '',                          'internal-nacl-plugin', [nacl, pnacl]),
+    ];
+    const arr = Object.create(PluginArray.prototype);
+    Object.defineProperty(arr, 'length', {get: () => plugins.length});
+    plugins.forEach((p, i) => { arr[i] = p; });
+    arr.item       = i    => arr[i] ?? null;
+    arr.namedItem  = name => plugins.find(p => p.name === name) ?? null;
+    arr.refresh    = () => {};
+    Object.defineProperty(navigator, 'plugins', {get: () => arr});
+})();
+
+// 6. permissions (Notification.permission)
+try {
+    const origQuery = navigator.permissions.query.bind(navigator.permissions);
+    navigator.permissions.query = (params) =>
+        params.name === 'notifications'
+            ? Promise.resolve({state: Notification.permission})
+            : origQuery(params);
+} catch(e) {}
+
+// 7. chrome object (full runtime stub)
+window.chrome = {
+    app: {
+        isInstalled: false,
+        InstallState: {DISABLED: 'disabled', INSTALLED: 'installed', NOT_INSTALLED: 'not_installed'},
+        RunningState: {CANNOT_RUN: 'cannot_run', READY_TO_RUN: 'ready_to_run', RUNNING: 'running'},
+    },
+    runtime: {
+        OnInstalledReason: {
+            CHROME_UPDATE: 'chrome_update', INSTALL: 'install',
+            SHARED_MODULE_UPDATE: 'shared_module_update', UPDATE: 'update',
+        },
+        PlatformOs: {ANDROID: 'android', CROS: 'cros', LINUX: 'linux', MAC: 'mac', WIN: 'win'},
+        PlatformArch: {ARM: 'arm', ARM64: 'arm64', X86_32: 'x86-32', X86_64: 'x86-64'},
+        RequestUpdateCheckStatus: {NO_UPDATE: 'no_update', THROTTLED: 'throttled', UPDATE_AVAILABLE: 'update_available'},
+        connect: () => {},
+        sendMessage: () => {},
+    },
+};
+
+// 8. screen dimensions (consistent with 1920×1080 viewport)
+try {
+    Object.defineProperty(screen, 'width',       {get: () => 1920});
+    Object.defineProperty(screen, 'height',      {get: () => 1080});
+    Object.defineProperty(screen, 'availWidth',  {get: () => 1920});
+    Object.defineProperty(screen, 'availHeight', {get: () => 1040});
+    Object.defineProperty(screen, 'colorDepth',  {get: () => 24});
+    Object.defineProperty(screen, 'pixelDepth',  {get: () => 24});
+    Object.defineProperty(window, 'outerWidth',  {get: () => 1920});
+    Object.defineProperty(window, 'outerHeight', {get: () => 1080});
+} catch(e) {}
+
+// 9. WebGL vendor / renderer (Intel, a common corporate machine)
+try {
+    const origGetParam = WebGLRenderingContext.prototype.getParameter;
+    WebGLRenderingContext.prototype.getParameter = function(p) {
+        if (p === 37445) return 'Intel Inc.';
+        if (p === 37446) return 'Intel Iris Plus Graphics OpenGL Engine';
+        return origGetParam.call(this, p);
+    };
+} catch(e) {}
+
+// 10. iframe contentWindow.navigator.webdriver
+try {
+    Object.defineProperty(HTMLIFrameElement.prototype, 'contentWindow', {
+        get: function() {
+            const w = Object.getOwnPropertyDescriptor(HTMLIFrameElement.prototype, 'contentWindow').get.call(this);
+            if (w) try { Object.defineProperty(w.navigator, 'webdriver', {get: () => undefined}); } catch(e) {}
+            return w;
+        },
+    });
+} catch(e) {}
+""")
 
         try:
             for search in searches:
