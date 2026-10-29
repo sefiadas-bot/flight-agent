@@ -60,6 +60,8 @@ EXPLORE_DESTINATIONS = [
     "WAW", "MAD", "LIS", "SOF", "LHR", "LGW", "ARN",
     "DUB", "ZRH", "MXP", "NAP", "OPO", "VAR", "SKG",
     "LJU", "ZAG", "KRK", "SZG",
+    # Added
+    "PAR", "TIA", "TBS",
 ]
 
 # ---------------------------------------------------------------------------
