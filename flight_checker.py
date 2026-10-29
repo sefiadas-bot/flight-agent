@@ -18,6 +18,7 @@ import hashlib
 import json
 import logging
 import os
+import random
 import re
 import sys
 import time
@@ -508,68 +509,10 @@ def _send_report(today, summary_lines, deal_sections, any_new_deals):
 
 
 # ---------------------------------------------------------------------------
-# Main
+# Browser stealth script (module-level so it can be applied to every new
+# browser context without duplication)
 # ---------------------------------------------------------------------------
-
-def main():
-    validate_env()
-    cfg = _cfg()
-
-    # Load persisted state and expire old entries
-    state = load_state()
-    prune_state(state)
-
-    log.info(
-        "Monthly requests used so far: %d / %d",
-        state.get("monthly_usage", {}).get("count", 0),
-        cfg["MAX_MONTHLY_REQUESTS"],
-    )
-
-    # Expand searches (resolve "ALL" destinations)
-    raw_searches = load_searches()
-    searches = []
-    for s in raw_searches:
-        if s["destination"].upper() == "ALL":
-            for dest in EXPLORE_DESTINATIONS:
-                searches.append({**s, "destination": dest})
-        else:
-            searches.append(s)
-
-    log.info(
-        "Loaded %d config(s) \u2192 %d search(es).", len(raw_searches), len(searches)
-    )
-
-    today = datetime.now(tz=timezone.utc).strftime("%d %b %Y")
-    summary_lines: list = []
-    deal_sections: list = []
-    any_new_deals = False
-    any_error = False
-    quota_hit = False
-
-    with sync_playwright() as p:
-        browser = p.chromium.launch(
-            headless=True,
-            args=[
-                "--no-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-features=IsolateOrigins,site-per-process",
-                "--window-size=1920,1080",
-            ],
-        )
-        context = browser.new_context(
-            user_agent=(
-                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/131.0.0.0 Safari/537.36"
-            ),
-            viewport={"width": 1920, "height": 1080},
-            locale="en-US",
-            timezone_id="America/New_York",
-        )
-        # Comprehensive stealth init script — runs in every page before any
-        # other script.  Patches the most common headless-detection vectors.
-        context.add_init_script("""
+_STEALTH_JS = """
 // 1. webdriver flag
 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
 
@@ -649,7 +592,7 @@ window.chrome = {
     },
 };
 
-// 8. screen dimensions (consistent with 1920×1080 viewport)
+// 8. screen dimensions (consistent with 1920x1080 viewport)
 try {
     Object.defineProperty(screen, 'width',       {get: () => 1920});
     Object.defineProperty(screen, 'height',      {get: () => 1080});
@@ -681,7 +624,58 @@ try {
         },
     });
 } catch(e) {}
-""")
+"""
+
+# ---------------------------------------------------------------------------
+# Main
+# ---------------------------------------------------------------------------
+
+def main():
+    validate_env()
+    cfg = _cfg()
+
+    # Load persisted state and expire old entries
+    state = load_state()
+    prune_state(state)
+
+    log.info(
+        "Monthly requests used so far: %d / %d",
+        state.get("monthly_usage", {}).get("count", 0),
+        cfg["MAX_MONTHLY_REQUESTS"],
+    )
+
+    # Expand searches (resolve "ALL" destinations)
+    raw_searches = load_searches()
+    searches = []
+    for s in raw_searches:
+        if s["destination"].upper() == "ALL":
+            for dest in EXPLORE_DESTINATIONS:
+                searches.append({**s, "destination": dest})
+        else:
+            searches.append(s)
+
+    log.info(
+        "Loaded %d config(s) \u2192 %d search(es).", len(raw_searches), len(searches)
+    )
+
+    today = datetime.now(tz=timezone.utc).strftime("%d %b %Y")
+    summary_lines: list = []
+    deal_sections: list = []
+    any_new_deals = False
+    any_error = False
+    quota_hit = False
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(
+            headless=True,
+            args=[
+                "--no-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-features=IsolateOrigins,site-per-process",
+                "--window-size=1920,1080",
+            ],
+        )
 
         try:
             for search in searches:
@@ -698,35 +692,55 @@ try {
                 route_deals: list = []
                 errors: list = []
 
-                for outbound_date, return_date in date_pairs:
-                    outbound_date = outbound_date.strip()
-                    return_date = return_date.strip()
+                # Fresh browser context per route: each route gets its own
+                # cookie jar and session storage so Google cannot correlate
+                # back-to-back searches within a single browser session.
+                context = browser.new_context(
+                    user_agent=(
+                        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/131.0.0.0 Safari/537.36"
+                    ),
+                    viewport={"width": 1920, "height": 1080},
+                    locale="en-US",
+                    timezone_id="America/New_York",
+                )
+                context.add_init_script(_STEALTH_JS)
 
-                    # Hard stop before exceeding monthly allowance
-                    if not quota_ok(state, cfg["MAX_MONTHLY_REQUESTS"]):
-                        log.warning(
-                            "Monthly request limit (%d) reached. "
-                            "Stopping searches early.",
-                            cfg["MAX_MONTHLY_REQUESTS"],
-                        )
-                        quota_hit = True
-                        break
+                try:
+                    for outbound_date, return_date in date_pairs:
+                        outbound_date = outbound_date.strip()
+                        return_date = return_date.strip()
 
-                    log.info("  Checking %s / %s \u2026", outbound_date, return_date)
-                    try:
-                        found = find_deals_with_retry(
-                            origin, destination, outbound_date, return_date,
-                            max_price, max_depart_hour, context,
-                        )
-                        charge_quota(state)
-                        route_deals.extend(found)
-                        log.info("  \u2192 %d deal(s) found", len(found))
-                    except Exception as exc:
-                        errors.append(str(exc))
-                        any_error = True
-                        log.error("  \u2192 Error: %s", exc)
-                    time.sleep(2)
+                        # Hard stop before exceeding monthly allowance
+                        if not quota_ok(state, cfg["MAX_MONTHLY_REQUESTS"]):
+                            log.warning(
+                                "Monthly request limit (%d) reached. "
+                                "Stopping searches early.",
+                                cfg["MAX_MONTHLY_REQUESTS"],
+                            )
+                            quota_hit = True
+                            break
 
+                        log.info("  Checking %s / %s \u2026", outbound_date, return_date)
+                        try:
+                            found = find_deals_with_retry(
+                                origin, destination, outbound_date, return_date,
+                                max_price, max_depart_hour, context,
+                            )
+                            charge_quota(state)
+                            route_deals.extend(found)
+                            log.info("  \u2192 %d deal(s) found", len(found))
+                        except Exception as exc:
+                            errors.append(str(exc))
+                            any_error = True
+                            log.error("  \u2192 Error: %s", exc)
+                        # Short random pause between date-pair loads (human-like)
+                        time.sleep(random.uniform(3, 7))
+                finally:
+                    context.close()
+
+                # ---- route-level summary (browser context no longer needed) ----
                 route_deals = sorted(route_deals, key=lambda x: x["price"])
                 date_strs = ", ".join(f"{o}\u2192{r}" for o, r in date_pairs)
                 route_label = (
@@ -734,7 +748,7 @@ try {
                 )
 
                 if route_deals:
-                    # Filter out deals already emailed in prior runs
+                    # Filter out deals already reported in prior runs
                     new_deals = []
                     for d in route_deals:
                         did = deal_id(
@@ -780,7 +794,7 @@ try {
                             )
                         deal_sections.append("\n".join(section))
                     else:
-                        # Deals exist but all already emailed previously
+                        # Deals exist but all already reported previously
                         summary_lines.append(
                             f"NO {route_label}  (seen in prior run)"
                         )
@@ -790,8 +804,13 @@ try {
                     )
                 else:
                     summary_lines.append(f"NO {route_label}")
+
+                # Human-like inter-route pause (skip after the last route)
+                if not quota_hit and search is not searches[-1]:
+                    delay = random.uniform(5, 15)
+                    log.info("Pausing %.0fs before next route \u2026", delay)
+                    time.sleep(delay)
         finally:
-            context.close()
             browser.close()
 
     save_state(state)
