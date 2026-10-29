@@ -278,6 +278,20 @@ _HTML = r"""<!DOCTYPE html>
         </div>
 
         <div>
+          <label class="block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">Date flexibility</label>
+          <select id="f-flexibility"
+            class="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm bg-white">
+            <option value="none">None &mdash; exact dates only</option>
+            <option value="+1">+1 day (also check the next day)</option>
+            <option value="-1">-1 day (also check the previous day)</option>
+            <option value="+/-1">&plusmn;1 day &mdash; 3 variants per pair</option>
+            <option value="+/-2">&plusmn;2 days &mdash; 5 variants per pair</option>
+            <option value="+/-3">&plusmn;3 days &mdash; 7 variants per pair</option>
+          </select>
+          <p class="text-xs text-slate-400 mt-1">Shifts the whole trip (outbound &amp; return move together, keeping trip length).</p>
+        </div>
+
+        <div>
           <div class="flex items-center justify-between mb-2">
             <label class="text-xs font-semibold text-slate-500 uppercase tracking-wide">Date pairs</label>
             <button type="button" onclick="addDatePair()"
@@ -353,9 +367,13 @@ function renderSearches() {
     return;
   }
   tb.innerHTML = searches.map((s, i) => {
+    const flex = s.date_flexibility && s.date_flexibility !== 'none' ? s.date_flexibility : null;
     const pairs = (s.date_pairs || [])
       .map(p => '<span class="mono text-xs">' + esc(p[0]) + ' &rarr; ' + esc(p[1]) + '</span>')
       .join('<br/>');
+    const flexBadge = flex
+      ? '<span class="ml-1.5 bg-amber-100 text-amber-700 text-xs rounded px-1.5 py-0.5 font-semibold">' + esc(flex) + '</span>'
+      : '';
     const destBadge = s.destination === 'ALL'
       ? '<span class="bg-purple-100 text-purple-700 text-xs rounded px-1.5 py-0.5 mono font-bold">ALL</span>'
       : '<span class="mono font-bold text-slate-800">' + esc(s.destination) + '</span>';
@@ -364,7 +382,7 @@ function renderSearches() {
       <td class="py-3 pr-4">${destBadge}</td>
       <td class="py-3 pr-4 text-green-700 font-medium mono">$${s.max_price}</td>
       <td class="py-3 pr-4 text-slate-600 mono">${s.max_depart_hour}:00</td>
-      <td class="py-3 pr-4 leading-relaxed">${pairs || '<span class="text-slate-400 text-xs">none</span>'}</td>
+      <td class="py-3 pr-4 leading-relaxed">${pairs || '<span class="text-slate-400 text-xs">none</span>'}${flexBadge}</td>
       <td class="py-3 text-right whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity">
         <button onclick="editSearch(${i})"
           class="text-blue-600 hover:text-blue-800 text-xs font-medium mr-3">Edit</button>
@@ -403,6 +421,7 @@ function openModal(idx = -1) {
   document.getElementById('f-dest').value = s.destination || '';
   document.getElementById('f-price').value = s.max_price ?? 650;
   document.getElementById('f-hour').value = s.max_depart_hour ?? 14;
+  document.getElementById('f-flexibility').value = s.date_flexibility || 'none';
   document.getElementById('date-pairs').innerHTML = '';
   document.getElementById('modal-error').classList.add('hidden');
   (s.date_pairs && s.date_pairs.length ? s.date_pairs : [['', '']]).forEach(p => addDatePair(p[0], p[1]));
@@ -442,12 +461,14 @@ async function saveSearch(e) {
     return;
   }
 
+  const flexibility = document.getElementById('f-flexibility').value;
   const entry = {
     origin:           document.getElementById('f-origin').value.toUpperCase().trim(),
     destination:      document.getElementById('f-dest').value.toUpperCase().trim(),
     max_price:        parseInt(document.getElementById('f-price').value, 10),
     max_depart_hour:  parseInt(document.getElementById('f-hour').value, 10),
     date_pairs,
+    ...(flexibility && flexibility !== 'none' ? { date_flexibility: flexibility } : {}),
   };
 
   if (idx >= 0) searches[idx] = entry; else searches.push(entry);

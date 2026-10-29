@@ -23,7 +23,7 @@ import re
 import sys
 import time
 import urllib.request
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from playwright.sync_api import sync_playwright
@@ -189,6 +189,56 @@ def load_searches():
     """Load search configurations from searches.json."""
     with open("searches.json", encoding="utf-8") as f:
         return json.load(f)
+
+
+# Recognised flexibility tokens and the day-offsets they generate.
+_FLEXIBILITY_OFFSETS: dict[str, list[int]] = {
+    "+1":   [0, 1],
+    "-1":   [-1, 0],
+    "+/-1": [-1, 0, 1],
+    "+/-2": [-2, -1, 0, 1, 2],
+    "+/-3": [-3, -2, -1, 0, 1, 2, 3],
+}
+
+
+def expand_date_pairs(date_pairs: list, flexibility: str | None) -> list:
+    """Return an expanded list of [outbound, return] date pairs.
+
+    The flexibility string shifts the *whole trip* (outbound and return move
+    together by the same offset) so the trip length stays constant.
+
+    flexibility values:
+        None / "none"  →  date_pairs unchanged
+        "+1"           →  original  + original+1 day
+        "-1"           →  original-1 day + original
+        "+/-1"         →  -1 day, exact, +1 day  (3 variants per pair)
+        "+/-2"         →  -2 … +2              (5 variants per pair)
+        "+/-3"         →  -3 … +3              (7 variants per pair)
+
+    Duplicate pairs (e.g. when two original pairs overlap after shifting) are
+    removed while preserving order.
+    """
+    if not flexibility or flexibility == "none":
+        return date_pairs
+
+    offsets = _FLEXIBILITY_OFFSETS.get(flexibility)
+    if offsets is None:
+        return date_pairs
+
+    expanded: list = []
+    seen: set = set()
+    for pair in date_pairs:
+        outbound = date.fromisoformat(str(pair[0]).strip())
+        return_d = date.fromisoformat(str(pair[1]).strip())
+        for delta in offsets:
+            new_pair = (
+                (outbound + timedelta(days=delta)).isoformat(),
+                (return_d  + timedelta(days=delta)).isoformat(),
+            )
+            if new_pair not in seen:
+                seen.add(new_pair)
+                expanded.append(list(new_pair))
+    return expanded
 
 
 # ---------------------------------------------------------------------------
@@ -688,7 +738,14 @@ def main():
                 max_depart_hour = search.get("max_depart_hour", 23)
                 date_pairs = search["date_pairs"]
 
-                log.info("%s \u2192 %s | max $%d", origin, destination, max_price)
+                flexibility = search.get("date_flexibility", "none")
+                date_pairs = expand_date_pairs(date_pairs, flexibility)
+
+                log.info(
+                    "%s \u2192 %s | max $%d | %d date pair(s)%s",
+                    origin, destination, max_price, len(date_pairs),
+                    f" [flex {flexibility}]" if flexibility and flexibility != "none" else "",
+                )
                 route_deals: list = []
                 errors: list = []
 

@@ -102,6 +102,67 @@ class TestBuildGoogleUrl:
 
 
 # ---------------------------------------------------------------------------
+# expand_date_pairs
+# ---------------------------------------------------------------------------
+
+class TestExpandDatePairs:
+    _pairs = [["2027-04-01", "2027-04-08"]]
+
+    def test_none_returns_unchanged(self):
+        assert fc.expand_date_pairs(self._pairs, "none") == self._pairs
+
+    def test_empty_flexibility_returns_unchanged(self):
+        assert fc.expand_date_pairs(self._pairs, "") == self._pairs
+
+    def test_plus1_adds_next_day(self):
+        result = fc.expand_date_pairs(self._pairs, "+1")
+        assert result == [
+            ["2027-04-01", "2027-04-08"],
+            ["2027-04-02", "2027-04-09"],
+        ]
+
+    def test_minus1_adds_prev_day(self):
+        result = fc.expand_date_pairs(self._pairs, "-1")
+        assert result == [
+            ["2027-03-31", "2027-04-07"],
+            ["2027-04-01", "2027-04-08"],
+        ]
+
+    def test_plus_minus_1_three_variants(self):
+        result = fc.expand_date_pairs(self._pairs, "+/-1")
+        assert len(result) == 3
+        assert result[0] == ["2027-03-31", "2027-04-07"]
+        assert result[1] == ["2027-04-01", "2027-04-08"]
+        assert result[2] == ["2027-04-02", "2027-04-09"]
+
+    def test_plus_minus_2_five_variants(self):
+        result = fc.expand_date_pairs(self._pairs, "+/-2")
+        assert len(result) == 5
+
+    def test_plus_minus_3_seven_variants(self):
+        result = fc.expand_date_pairs(self._pairs, "+/-3")
+        assert len(result) == 7
+
+    def test_trip_length_preserved(self):
+        result = fc.expand_date_pairs(self._pairs, "+/-3")
+        for pair in result:
+            from datetime import date
+            out = date.fromisoformat(pair[0])
+            ret = date.fromisoformat(pair[1])
+            assert (ret - out).days == 7  # original trip was 7 nights
+
+    def test_duplicates_removed(self):
+        # Two overlapping pairs: shifting +/-1 creates some overlaps
+        pairs = [["2027-04-01", "2027-04-08"], ["2027-04-02", "2027-04-09"]]
+        result = fc.expand_date_pairs(pairs, "+/-1")
+        # unique pairs only
+        assert len(result) == len({tuple(p) for p in result})
+
+    def test_unknown_flexibility_returns_unchanged(self):
+        assert fc.expand_date_pairs(self._pairs, "bogus") == self._pairs
+
+
+# ---------------------------------------------------------------------------
 # deal_id  (stable deduplication key)
 # ---------------------------------------------------------------------------
 
